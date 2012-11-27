@@ -218,19 +218,17 @@ slab_heapinfo_init(void)
     heapinfo.nslab = 0;
     heapinfo.max_nslab = settings.maxbytes / settings.slab_size;
 
-    heapinfo.base = NULL;
-    if (settings.prealloc) {
-        heapinfo.base = mc_alloc(heapinfo.max_nslab * settings.slab_size);
-        if (heapinfo.base == NULL) {
-            log_error("pre-alloc %zu bytes for %"PRIu32" slabs failed: %s",
-                      heapinfo.max_nslab * settings.slab_size,
-                      heapinfo.max_nslab, strerror(errno));
-            return MC_ENOMEM;
-        }
-
-        log_debug(LOG_INFO, "pre-allocated %zu bytes for %"PRIu32" slabs",
-                  settings.maxbytes, heapinfo.max_nslab);
+    heapinfo.base = mc_alloc(heapinfo.max_nslab * settings.slab_size);
+    if (heapinfo.base == NULL) {
+        log_error("pre-alloc %zu bytes for %"PRIu32" slabs failed: %s",
+                  heapinfo.max_nslab * settings.slab_size,
+                  heapinfo.max_nslab, strerror(errno));
+        return MC_ENOMEM;
     }
+
+    log_debug(LOG_INFO, "pre-allocated %zu bytes for %"PRIu32" slabs",
+              settings.maxbytes, heapinfo.max_nslab);
+
     heapinfo.curr = heapinfo.base;
 
     heapinfo.slab_table = mc_alloc(sizeof(*heapinfo.slab_table) * heapinfo.max_nslab);
@@ -296,12 +294,8 @@ slab_heap_alloc(void)
 {
     struct slab *slab;
 
-    if (settings.prealloc) {
-        slab = (struct slab *)heapinfo.curr;
-        heapinfo.curr += settings.slab_size;
-    } else {
-        slab = mc_alloc(settings.slab_size);
-    }
+    slab = (struct slab *)heapinfo.curr;
+    heapinfo.curr += settings.slab_size;
 
     return slab;
 }

@@ -35,7 +35,6 @@ extern struct settings settings;
 
 struct thread_worker *threads;       /* worker threads */
 struct thread_aggregator aggregator; /* aggregator thread */
-struct thread_klogger klogger;       /* klogger thread */
 struct thread_key keys;              /* thread-locak keys */
 static int last_thread;              /* last thread we assigned connection to most recently */
 
@@ -142,12 +141,6 @@ thread_setkeys(struct thread_worker *t)
         return MC_ERROR;
     }
 
-    err = pthread_setspecific(keys.kbuf, t->kbuf);
-    if (err != 0) {
-        log_error("pthread setspecific failed: %s", strerror(err));
-        return MC_ERROR;
-    }
-
     return MC_OK;
 }
 
@@ -248,15 +241,9 @@ thread_setup(struct thread_worker *t)
         return status;
     }
 
-    t->kbuf = klog_buf_create();
-    if (t->kbuf == NULL) {
-        log_error("klog buf create failed: %s", strerror(errno));
-        return MC_ENOMEM;
-    }
-
     conn_cq_init(&t->new_cq);
 
-    suffix_size = settings.use_cas ? (CAS_SUFFIX_SIZE + SUFFIX_SIZE) : SUFFIX_SIZE;
+    suffix_size = SUFFIX_SIZE;
     t->suffix_cache = cache_create("suffix", suffix_size, sizeof(char *));
     if (t->suffix_cache == NULL) {
         log_error("cache create of suffix cache failed: %s", strerror(errno));
@@ -344,79 +331,8 @@ thread_setup_aggregator(void)
     return MC_OK;
 }
 
-/*
- * Klogger thread event loop
- */
-static void
-thread_klogger_collect(int fd, short ev, void *arg)
-{
-    if (klog_enabled()) {
-        evtimer_add(&klogger.ev, &settings.klog_intvl);
-        klog_collect();
-    } else {
-        /*
-         * If logging is turned off, come back & check in 0.01 seconds. We
-         * use a small value so that we don't overrun the buffer when
-         * klogger is turned on
-         */
-        struct timeval sleep;
-        sleep.tv_sec = 0;
-        sleep.tv_usec = 10000;
-        evtimer_add(&klogger.ev, &sleep);
-    }
-}
-
-/*
- * Klogger thread main
- */
-static void *
-thread_klogger_main(void *arg)
-{
-    pthread_mutex_lock(&init_lock);
-    klogger.tid = pthread_self();
-    init_count++;
-    pthread_cond_signal(&init_cond);
-    pthread_mutex_unlock(&init_lock);
-
-    event_base_dispatch(klogger.base);
-
-    return NULL;
-}
-
-/*
- * Setup klogger thread
- */
-static rstatus_t
-thread_setup_klogger(void)
-{
-    int status;
-
-    klogger.base = event_base_new();
-    if (NULL == klogger.base) {
-        log_error("event init failed: %s", strerror(errno));
-        return MC_ERROR;
-    }
-
-    evtimer_set(&klogger.ev, thread_klogger_collect, NULL);
-    event_base_set(klogger.base, &klogger.ev);
-
-    status = evtimer_add(&klogger.ev, &settings.klog_intvl);
-    if (status < 0) {
-        log_error("evtimer add failed: %s", strerror(errno));
-        return status;
-    }
-
-    return MC_OK;
-}
-
-
-/*
- * Dispatches a new connection to another thread. This is only ever called
- * from the main thread, either during initialization (for UDP) or because
- * of an incoming connection.
- */
 rstatus_t
-thread_dispatch(int sd, conn_state_t state, int ev_flags, int udp)
+thread_dispatch(int sd, conn_state_t state, int ev_flags)
 {
     int tid;
     struct thread_worker *t;
@@ -424,14 +340,12 @@ thread_dispatch(int sd, conn_state_t state, int ev_flags, int udp)
     struct conn *c;
     int rsize;
 
-    rsize = udp ? UDP_BUFFER_SIZE : TCP_BUFFER_SIZE;
+    rsize = TCP_BUFFER_SIZE;
 
-    c = conn_get(sd, state, ev_flags, rsize, udp);
+    c = conn_get(sd, state, ev_flags, rsize);
     if (c == NULL) {
         return MC_ENOMEM;
     }
-
-    mc_resolve_peer(c->sd, c->peer, sizeof(c->peer));
 
     tid = (last_thread + 1) % settings.num_workers;
     t = threads + tid;
@@ -447,8 +361,7 @@ thread_dispatch(int sd, conn_state_t state, int ev_flags, int udp)
     }
 
     if (state == CONN_NEW_CMD) {
-        log_debug(LOG_NOTICE, "accepted c %d from '%s' on tid %d", c->sd,
-                  c->peer, tid);
+        log_debug(LOG_NOTICE, "accepted c %d on tid %d", c->sd, tid);
     }
 
     return MC_OK;
@@ -491,12 +404,6 @@ thread_init(struct event_base *main_base)
     }
 
     err = pthread_key_create(&keys.stats_slabs, NULL);
-    if (err != 0) {
-        log_error("pthread key create failed: %s", strerror(err));
-        return MC_ERROR;
-    }
-
-    err = pthread_key_create(&keys.kbuf, NULL);
     if (err != 0) {
         log_error("pthread key create failed: %s", strerror(err));
         return MC_ERROR;
@@ -561,23 +468,9 @@ thread_init(struct event_base *main_base)
         return status;
     }
 
-    /* for klogger */
-
-    /* Setup thread data structure */
-    status = thread_setup_klogger();
-    if (status != MC_OK) {
-        return status;
-    }
-
-    /* create thread */
-    status = thread_create(thread_klogger_main, NULL);
-    if (status != MC_OK) {
-        return status;
-    }
-
     /* wait for all the workers and dispatcher to set themselves up */
     pthread_mutex_lock(&init_lock);
-    while (init_count < nworkers + 2) { /* +2: aggregator & klogger */
+    while (init_count < nworkers + 1) { /* +1: aggregator */
         pthread_cond_wait(&init_cond, &init_lock);
     }
     pthread_mutex_unlock(&init_lock);

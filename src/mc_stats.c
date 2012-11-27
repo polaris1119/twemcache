@@ -580,87 +580,28 @@ stats_slabs(struct conn *c)
 }
 
 /*
- * Process command "stats sizes\r\n". Dumps a list of objects of each size
- * in 32-byte increments
- */
-void
-stats_sizes(void *c)
-{
-    uint32_t *histogram;
-    int num_buckets;
-
-    num_buckets = settings.slab_size / STATS_BUCKET_SIZE + 1;
-    histogram = mc_zalloc(sizeof(int) * num_buckets);
-
-    pthread_mutex_lock(&cache_lock);
-    if (histogram != NULL) {
-        uint32_t i;
-
-        /* build the histogram */
-        for (i = SLABCLASS_MIN_ID; i <= slabclass_max_id; i++) {
-            struct item *iter;
-
-            TAILQ_FOREACH(iter, &item_lruq[i], i_tqe) {
-                int ntotal = item_size(iter);
-                int bucket = (ntotal - 1) / STATS_BUCKET_SIZE + 1;
-                ASSERT(bucket < num_buckets);
-                histogram[bucket]++;
-            }
-        }
-
-        /* write the buffer */
-        for (i = 0; i < num_buckets; i++) {
-            if (histogram[i] != 0) {
-                char key[8];
-                ASSERT(snprintf(key, sizeof(key), "%d", i * 32) < sizeof(key));
-                stats_print(c, key, "%u", histogram[i]);
-            }
-        }
-        mc_free(histogram);
-    }
-    stats_append(c, NULL, 0, NULL, 0);
-    pthread_mutex_unlock(&cache_lock);
-}
-
-/*
  * Process command "stats settings\r\n".
  */
 void
 stats_settings(void *c)
 {
-    stats_print(c, "prealloc", "%u", (unsigned int)settings.prealloc);
-    stats_print(c, "lock_page", "%u", (unsigned int)settings.lock_page);
     stats_print(c, "accepting_conns", "%u", (unsigned int)settings.accepting_conns);
     stats_print(c, "daemonize", "%u", (unsigned int)settings.daemonize);
-    stats_print(c, "max_corefile", "%u", (unsigned int)settings.max_corefile);
-    stats_print(c, "cas_enabled", "%u", (unsigned int)settings.use_cas);
     stats_print(c, "num_workers", "%d", settings.num_workers);
     stats_print(c, "reqs_per_event", "%d", settings.reqs_per_event);
     stats_print(c, "oldest", "%u", settings.oldest_live);
     stats_print(c, "log_filename", "%s", settings.log_filename);
     stats_print(c, "verbosity", "%d", settings.verbose);
-    stats_print(c, "maxconns", "%d", settings.maxconns);
     stats_print(c, "tcpport", "%d", settings.port);
-    stats_print(c, "udpport", "%d", settings.udpport);
-    stats_print(c, "interface", "%s", settings.interface ? settings.interface : "");
-    stats_print(c, "domain_socket", "%s",
-                settings.socketpath ? settings.socketpath : "NULL");
-    stats_print(c, "umask", "%o", settings.access);
     stats_print(c, "tcp_backlog", "%d", settings.backlog);
     stats_print(c, "evictions", "%d", settings.evict_opt);
     stats_print(c, "growth_factor", "%.2f", settings.factor);
     stats_print(c, "maxbytes", "%zu", settings.maxbytes);
     stats_print(c, "chunk_size", "%d", settings.chunk_size);
     stats_print(c, "slab_size", "%d", settings.slab_size);
-    stats_print(c, "username", "%s", settings.username);
     stats_print(c, "stats_agg_intvl", "%10.6f", settings.stats_agg_intvl.tv_sec +
                 1.0 * settings.stats_agg_intvl.tv_usec / 1000000);
     stats_print(c, "hash_power", "%d", settings.hash_power);
-    stats_print(c, "klog_name", "%s", settings.klog_name);
-    stats_print(c, "klog_sampling_rate", "%d", settings.klog_sampling_rate);
-    stats_print(c, "klog_entry", "%d", settings.klog_entry);
-    stats_print(c, "klog_intvl", "%10.6f", settings.klog_intvl.tv_sec +
-                1.0 * settings.klog_intvl.tv_usec / 1000000);
 }
 
 /*
@@ -683,7 +624,7 @@ stats_default(struct conn *c)
 
     getrusage(RUSAGE_SELF, &usage);
 
-    stats_print(c, "pid", "%d", (int)settings.pid);
+    stats_print(c, "pid", "%d", (int)getpid());
     stats_print(c, "uptime", "%u", uptime);
     stats_print(c, "time", "%ld", abstime);
     stats_print(c, "aggregate_ts", "%ld.%06ld", aggregator.stats_ts.tv_sec,

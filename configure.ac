@@ -124,19 +124,6 @@ AS_IF(
   [AC_MSG_RESULT([no])]
 )
 
-# Check whether to disable command logger (klog)
-AC_MSG_CHECKING([whether to disable command logger (klog)])
-AC_ARG_ENABLE([klog],
-  [AS_HELP_STRING([--disable-klog], [disable klogger])])
-AS_IF(
-  [test "x$enable_klog" = "xno"],
-  [
-    AC_DEFINE([DISABLE_KLOG], [1], [Define to 1 if klogger is disabled])
-    AC_MSG_RESULT([yes])
-  ],
-  [AC_MSG_RESULT([no])]
-)
-
 # Libevent detection; swiped from Tor, modified a bit
 trylibeventdir=""
 AC_ARG_WITH([libevent],

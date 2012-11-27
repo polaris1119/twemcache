@@ -61,11 +61,7 @@
 #define MC_CHUNK_SIZE       ITEM_CHUNK_SIZE
 #define MC_SLAB_SIZE        SLAB_SIZE
 
-#define MC_SLAB_PREALLOC    false
-#define MC_LOCK_PAGES       false
 #define MC_DAEMONIZE        false
-#define MC_MAXIMIZE_CORE    false
-#define MC_DISABLE_CAS      false
 
 #define MC_LOG_FILE         NULL
 #define MC_LOG_DEFAULT      LOG_NOTICE
@@ -78,26 +74,14 @@
 
 #define MC_HASH_MAX_POWER   HASH_MAX_POWER
 
-#define MC_KLOG_INTVL       KLOG_DEFAULT_INTVL
-#define MC_KLOG_SMP_RATE    KLOG_DEFAULT_SMP_RATE
-#define MC_KLOG_ENTRY       KLOG_DEFAULT_ENTRY
-#define MC_KLOG_FILE        NULL
-#define MC_KLOG_BACKUP      NULL
-#define MC_KLOG_BACKUP_SUF  ".old"
-
 #define MC_WORKERS          4
 #define MC_PID_FILE         NULL
-#define MC_USER             NULL
 
 #define MC_REQ_PER_EVENT    20
 #define MC_MAX_CONNS        1024
 #define MC_BACKLOG          1024
 
 #define MC_TCP_PORT         11211
-#define MC_UDP_PORT         11211
-#define MC_INTERFACE        NULL
-#define MC_UNIX_PATH        NULL
-#define MC_ACCESS_MASK      0700
 
 #define MC_EVICT            EVICT_RS
 #define MC_EVICT_STR        "random"
@@ -115,31 +99,16 @@ static char *profile_optarg;       /* profile optarg */
 static struct option long_options[] = {
     { "help",                 no_argument,        NULL,   'h' }, /* help */
     { "version",              no_argument,        NULL,   'V' }, /* version */
-    { "prealloc",             no_argument,        NULL,   'E' }, /* preallocate slabs */
-    { "use-large-pages",      no_argument,        NULL,   'L' }, /* use large memory pages */
-    { "lock-pages",           no_argument,        NULL,   'k' }, /* lock all pages */
     { "daemonize",            no_argument,        NULL,   'd' }, /* daemon mode */
-    { "maximize-core-limit",  no_argument,        NULL,   'r' }, /* maximize corefile limit */
-    { "disable-cas",          no_argument,        NULL,   'C' }, /* disable cas */
     { "describe-stats",       no_argument,        NULL,   'D' }, /* print stats description and exit */
     { "show-sizes",           no_argument,        NULL,   'S' }, /* print slab & item struct sizes and exit */
     { "output",               required_argument,  NULL,   'o' }, /* output logfile */
     { "verbosity",            required_argument,  NULL,   'v' }, /* log verbosity level */
     { "stats-aggr-interval",  required_argument,  NULL,   'A' }, /* stats aggregation interval in usec */
-    { "klog-entry",           required_argument,  NULL,   'x' }, /* command logging entry number */
-    { "klog-file",            required_argument,  NULL,   'X' }, /* command logging file */
-    { "klog-sample-rate",     required_argument,  NULL,   'y' }, /* command logging sampling rate */
     { "threads",              required_argument,  NULL,   't' }, /* # of threads */
-    { "pidfile",              required_argument,  NULL,   'P' }, /* pid file */
-    { "user",                 required_argument,  NULL,   'u' }, /* user identity to run as */
     { "max-requests",         required_argument,  NULL,   'R' }, /* max request per event */
-    { "max-conns",            required_argument,  NULL,   'c' }, /* max simultaneous connections */
     { "backlog",              required_argument,  NULL,   'b' }, /* tcp backlog queue limit */
     { "port",                 required_argument,  NULL,   'p' }, /* tcp port number to listen on */
-    { "udp-port",             required_argument,  NULL,   'U' }, /* udp port number to listen on */
-    { "interface",            required_argument,  NULL,   'l' }, /* interface to listen on */
-    { "unix-path",            required_argument,  NULL,   's' }, /* unix socket path to listen on */
-    { "access-mask",          required_argument,  NULL,   'a' }, /* access mask for unix socket */
     { "eviction-strategy",    required_argument,  NULL,   'M' }, /* eviction strategy on OOM */
     { "factor",               required_argument,  NULL,   'f' }, /* growth factor for slab items */
     { "max-memory",           required_argument,  NULL,   'm' }, /* max memory for all items in MB */
@@ -152,31 +121,16 @@ static struct option long_options[] = {
 static char short_options[] =
     "h"  /* help */
     "V"  /* version */
-    "E"  /* preallocate slabs */
-    "L"  /* use large memory pages */
-    "k"  /* lock all pages */
     "d"  /* daemon mode */
-    "r"  /* maximize corefile limit */
-    "C"  /* disable cas */
     "D"  /* print stats description and exit */
     "S"  /* print slab & item struct sizes and exit */
     "o:" /* output logfile */
     "v:" /* log verbosity level */
     "A:" /* stats aggregation interval in msec */
-    "x:" /* command logging entry number */
-    "X:" /* command logging file */
-    "y:" /* command logging sample rate */
     "t:" /* # of threads */
-    "P:" /* pid file */
-    "u:" /* user identity to run as */
     "R:" /* max request per event */
-    "c:" /* max simultaneous connections */
     "b:" /* tcp backlog queue limit */
     "p:" /* tcp port number to listen on */
-    "U:" /* udp port number to listen on */
-    "l:" /* interface to listen on */
-    "s:" /* unix socket path to listen on */
-    "a:" /* access mask for unix socket */
     "M:" /* eviction strategy on OOM */
     "f:" /* growth factor for slab items */
     "m:" /* max memory for all items in MB */
@@ -189,25 +143,18 @@ static void
 mc_show_usage(void)
 {
     log_stderr(
-        "Usage: twemcache [-?hVCELdkrDS] [-o output file] [-v verbosity level]" CRLF
-        "           [-A stats aggr interval] [-e hash power]" CRLF
-        "           [-t threads] [-P pid file] [-u user]" CRLF
-        "           [-x command logging entry] [-X command logging file] [-y command logging sample rate]" CRLF
-        "           [-R max requests] [-c max conns] [-b backlog] [-p port] [-U udp port]" CRLF
-        "           [-l interface] [-s unix path] [-a access mask] [-M eviction strategy]" CRLF
-        "           [-f factor] [-m max memory] [-n min item chunk size] [-I slab size]" CRLF
+        "Usage: twemcache [-?hVdDS] [-o output file] [-v verbosity level]" CRLF
+        "           [-A stats aggr interval] [-e hash power] [-t threads]" CRLF
+        "           [-R max requests]  [-b backlog] [-p port] " CRLF
+        "           [-M eviction strategy] [-f factor] [-m max memory] " CRLF
+        "           [-n min item chunk size] [-I slab size]" CRLF
         "           [-z slab profile]" CRLF
         "");
     log_stderr(
         "Options:" CRLF
         "  -h, --help                  : this help" CRLF
         "  -V, --version               : show version and exit" CRLF
-        "  -E, --prealloc              : preallocate memory for all slabs" CRLF
-        "  -L, --use-large-pages       : use large pages if available" CRLF
-        "  -k, --lock-pages            : lock all pages and preallocate slab memory" CRLF
         "  -d, --daemonize             : run as a daemon" CRLF
-        "  -r, --maximize-core-limit   : maximize core file limit" CRLF
-        "  -C, --disable-cas           : disable use of cas" CRLF
         "  -D, --describe-stats        : print stats description and exit" CRLF
         "  -S, --show-sizes            : print slab and item struct sizes and exit"
         " ");
@@ -217,41 +164,20 @@ mc_show_usage(void)
         "  -v, --verbosity=N           : set the logging level (default: %d, min: %d, max: %d)" CRLF
         "  -A, --stats-aggr-interval=N : set the stats aggregation interval in usec (default: %d usec)" CRLF
         "  -e, --hash-power=N          : set the hash table size as a power of 2 (default: 0, adjustable)" CRLF
-        "  -t, --threads=N             : set number of threads to use (default: %d)" CRLF
-        "  -P, --pidfile=S             : set the pid file (default: %s)" CRLF
-        "  -u, --user=S                : set user identity when run as root (default: %s)"
+        "  -t, --threads=N             : set number of threads to use (default: %d)"
         " ",
         MC_LOG_FILE != NULL ? MC_LOG_FILE : "stderr", MC_LOG_DEFAULT, MC_LOG_MIN, MC_LOG_MAX,
         MC_STATS_INTVL,
-        MC_WORKERS,
-        MC_PID_FILE != NULL ? MC_PID_FILE : "off",
-        MC_USER != NULL ? MC_USER : "off"
-        );
-
-    log_stderr(
-        "  -x, --klog-entry=N          : set the command logging entry number per thread (default: %d)" CRLF
-        "  -X, --klog-file=S           : set the command logging file (default: %s)" CRLF
-        "  -y, --klog-sample-rate=N    : set the command logging sample rate (default: %d)"
-        " ",
-        MC_KLOG_ENTRY,
-        MC_KLOG_FILE != NULL ? MC_KLOG_FILE : "off",
-        MC_KLOG_SMP_RATE
+        MC_WORKERS
         );
 
     log_stderr(
         "  -R, --max-requests=N        : set the maximum number of requests per event (default: %d)" CRLF
-        "  -c, --max-conns=N           : set the maximum simultaneous connections (default: %d)" CRLF
         "  -b, --backlog=N             : set the backlog queue limit (default %d)" CRLF
-        "  -p, --port=N                : set the tcp port to listen on (default: %d)" CRLF
-        "  -U, --udp-port=N            : set the udp port to listen on (default: %d)" CRLF
-        "  -l, --interface=S           : set the interface to listen on (default: %s)" CRLF
-        "  -s, --unix-path=S           : set the unix socket path to listen on (default: %s)" CRLF
-        "  -a, --access-mask=O         : set the access mask for unix socket in octal (default: %04o)"
+        "  -p, --port=N                : set the tcp port to listen on (default: %d)"
         " ",
-        MC_REQ_PER_EVENT, MC_MAX_CONNS, MC_BACKLOG,
-        MC_TCP_PORT, MC_UDP_PORT,
-        MC_INTERFACE != NULL ? MC_INTERFACE : "all",
-        MC_UNIX_PATH != NULL ? MC_UNIX_PATH : "off", MC_ACCESS_MASK
+        MC_REQ_PER_EVENT, MC_BACKLOG,
+        MC_TCP_PORT
         );
 
     log_stderr(
@@ -267,57 +193,6 @@ mc_show_usage(void)
         MC_CHUNK_SIZE,
         SLAB_SIZE
         );
-}
-
-static rstatus_t
-mc_create_pidfile(void)
-{
-    rstatus_t status;
-    char pid[MC_UINTMAX_MAXLEN];
-    int fd, pid_len;
-    ssize_t n;
-
-    fd = open(settings.pid_filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd < 0) {
-        log_error("opening pid file '%s' failed: %s", settings.pid_filename,
-                  strerror(errno));
-        return MC_ERROR;
-    }
-    settings.pid_file = 1;
-
-    pid_len = mc_snprintf(pid, MC_UINTMAX_MAXLEN, "%d", settings.pid);
-
-    n = mc_write(fd, pid, pid_len);
-    if (n < 0) {
-        log_error("write to pid file '%s' failed: %s", settings.pid_filename,
-                  strerror(errno));
-        return MC_ERROR;
-    }
-
-    status = close(fd);
-    if (status < 0) {
-        log_error("close pid file '%s' failed: %s", settings.pid_filename,
-                  strerror(errno));
-        return MC_ERROR;
-    }
-
-    return MC_OK;
-}
-
-static void
-mc_remove_pidfile(void)
-{
-    int status;
-
-    if (!settings.pid_file) {
-        return;
-    }
-
-    status = unlink(settings.pid_filename);
-    if (status < 0) {
-        log_error("unlink of pid file '%s' failed, ignored: %s",
-                  settings.pid_filename, strerror(errno));
-    }
 }
 
 static rstatus_t
@@ -420,98 +295,22 @@ mc_daemonize(int dump_core)
     return MC_OK;
 }
 
-/*
- * On systems that supports multiple page sizes we may reduce the
- * number of TLB-misses by using the biggest available page size
- */
-static int
-mc_enable_large_pages(void)
-{
-#ifdef MC_LARGE_PAGES
-    int ret, i, avail;
-    size_t sizes[32];
-    size_t max = sizes[0];
-    struct memcntl_mha arg = {0};
-
-    avail = getpagesizes(sizes, 32);
-    if (avail < 0) {
-        log_error("getpagesizes failed: %s, using default page size",
-                  strerror(errno));
-        return -1;
-    }
-
-    for (i = 1; i < avail; i++) {
-        if (max < sizes[i]) {
-            max = sizes[i];
-        }
-    }
-
-    arg.mha_flags = 0;
-    arg.mha_pagesize = max;
-    arg.mha_cmd = MHA_MAPSIZE_BSSBRK;
-
-    ret = memcntl(0, 0, MC_HAT_ADVISE, (caddr_t)&arg, 0, 0);
-    if (ret < 0) {
-        log_error("memctl to to set large pages failed: %s, using default "
-                  "page size", strerror(errno));
-        return ret;
-    }
-#endif
-
-    return 0;
-}
-
-static rstatus_t
-mc_lock_page(void)
-{
-#ifdef MC_MLOCKALL
-    int status;
-
-    status = mlockall(MCL_CURRENT | MCL_FUTURE);
-    if (status < 0) {
-        log_stderr("twemcache: -k option to mlockall failed: %s",
-                   strerror(errno));
-        return MC_ERROR;
-    }
-    return MC_OK;
-#else
-    log_stderr("twemcache: -k option to mlockall not supported");
-    return MC_ERROR;
-#endif
-}
-
 static void
 mc_set_default_options(void)
 {
-    settings.prealloc = MC_SLAB_PREALLOC;
-    settings.lock_page = MC_LOCK_PAGES;
     settings.daemonize = MC_DAEMONIZE;
-    settings.max_corefile = MC_MAXIMIZE_CORE;
-    settings.use_cas = MC_DISABLE_CAS ? false : true;
 
     settings.log_filename = MC_LOG_FILE;
     settings.verbose = MC_LOG_DEFAULT;
 
     stats_set_interval(MC_STATS_INTVL);
 
-    settings.klog_name = MC_KLOG_FILE;
-    settings.klog_backup = MC_KLOG_BACKUP;
-    settings.klog_sampling_rate = MC_KLOG_SMP_RATE;
-    settings.klog_entry = MC_KLOG_ENTRY;
-    klog_set_interval(MC_KLOG_INTVL);
-    settings.klog_running = false;
-
     settings.num_workers = MC_WORKERS;
-    settings.username = MC_USER;
 
     settings.reqs_per_event = MC_REQ_PER_EVENT;
     settings.maxconns = MC_MAX_CONNS;
     settings.backlog = MC_BACKLOG;
     settings.port = MC_TCP_PORT;
-    settings.udpport = MC_UDP_PORT;
-    settings.interface = MC_INTERFACE;
-    settings.socketpath = MC_UNIX_PATH;
-    settings.access = MC_ACCESS_MASK;
 
     settings.evict_opt = MC_EVICT;
     settings.use_freeq = true;
@@ -525,10 +324,6 @@ mc_set_default_options(void)
     settings.accepting_conns = true;
     settings.oldest_live = 0;
 
-    settings.pid = 0;
-    settings.pid_filename = MC_PID_FILE;
-    settings.pid_file = 0;
-
     memset(settings.profile, 0, sizeof(settings.profile));
     settings.profile_last_id = SLABCLASS_MAX_ID;
 }
@@ -538,10 +333,7 @@ mc_get_options(int argc, char **argv)
 {
     int c, value, factor;
     size_t len;
-    bool tcp_specified, udp_specified;
 
-    tcp_specified = false;
-    udp_specified = false;
     opterr = 0;
 
     for (;;) {
@@ -561,31 +353,8 @@ mc_get_options(int argc, char **argv)
             show_version = 1;
             break;
 
-        case 'E':
-            settings.prealloc = true;
-            break;
-
-        case 'L':
-            if (mc_enable_large_pages() == 0) {
-                settings.prealloc = true;
-            }
-            break;
-
-        case 'k':
-            settings.lock_page = true;
-            settings.prealloc = true;
-            break;
-
         case 'd':
             settings.daemonize = true;
-            break;
-
-        case 'r':
-            settings.max_corefile = true;
-            break;
-
-        case 'C':
-            settings.use_cas = false;
             break;
 
         case 'D':
@@ -651,38 +420,6 @@ mc_get_options(int argc, char **argv)
             settings.hash_power = value;
             break;
 
-        case 'x':
-            value = mc_atoi(optarg, strlen(optarg));
-            if (value <= 0) {
-                log_stderr("twemcache: option -x requires a positive number");
-                return MC_ERROR;
-            }
-            settings.klog_entry = value;
-            break;
-
-        case 'X':
-            settings.klog_name = optarg;
-            len = strlen(optarg) + sizeof(MC_KLOG_BACKUP_SUF);
-            settings.klog_backup = mc_alloc(len);
-            if (settings.klog_backup == NULL) {
-                log_stderr("twemcache: cannot generate klog backup filename");
-                return MC_ERROR;
-            }
-            value = mc_snprintf(settings.klog_backup, len, "%s"MC_KLOG_BACKUP_SUF,
-                        settings.klog_name);
-            ASSERT(value < len);
-            settings.klog_running = true;
-            break;
-
-        case 'y':
-            value = mc_atoi(optarg, strlen(optarg));
-            if (value <= 0) {
-                log_stderr("twemcache: option -y requires a positive number");
-                return MC_ERROR;
-            }
-            settings.klog_sampling_rate = value;
-            break;
-
         case 't':
             value = mc_atoi(optarg, strlen(optarg));
             if (value <= 0) {
@@ -693,14 +430,6 @@ mc_get_options(int argc, char **argv)
             settings.num_workers = value;
             break;
 
-        case 'P':
-            settings.pid_filename = optarg;
-            break;
-
-        case 'u':
-            settings.username = optarg;
-            break;
-
         case 'R':
             value = mc_atoi(optarg, strlen(optarg));
             if (value <= 0) {
@@ -709,16 +438,6 @@ mc_get_options(int argc, char **argv)
             }
 
             settings.reqs_per_event = value;
-            break;
-
-        case 'c':
-            value = mc_atoi(optarg, strlen(optarg));
-            if (value <= 0) {
-                log_stderr("twemcache: option -c requires a non zero number");
-                return MC_ERROR;
-            }
-
-            settings.maxconns = value;
             break;
 
         case 'b':
@@ -744,39 +463,6 @@ mc_get_options(int argc, char **argv)
             }
 
             settings.port = value;
-            tcp_specified = true;
-            break;
-
-        case 'U':
-            value = mc_atoi(optarg, strlen(optarg));
-            if (value <= 0) {
-                log_stderr("twemcache: option -U requires a non number");
-                return MC_ERROR;
-            }
-
-            if (!mc_valid_port(value)) {
-                log_stderr("twemcache: option -U value %d is not a valid "
-                           "port", value);
-            }
-
-            settings.udpport = value;
-            udp_specified = true;
-            break;
-
-        case 'l':
-            settings.interface = optarg;
-            break;
-
-        case 's':
-            settings.socketpath = optarg;
-            break;
-
-        case 'a':
-            if (!mc_str2oct(optarg, &value)) {
-                log_stderr("twemcache: option -a requires an octal number");
-                return MC_ERROR;
-            }
-            settings.access = value;
             break;
 
         case 'M':
@@ -895,19 +581,13 @@ mc_get_options(int argc, char **argv)
                 log_stderr("twemcache: option -%c requires a file name", optopt);
                 break;
 
-            case 's':
-                log_stderr("twemcache: option -%c requires a path name", optopt);
-                break;
-
             case 'v':
             case 'A':
             case 'e':
             case 't':
             case 'R':
-            case 'c':
             case 'b':
             case 'p':
-            case 'U':
             case 'a':
             case 'M':
             case 'f':
@@ -916,8 +596,6 @@ mc_get_options(int argc, char **argv)
                 log_stderr("twemcache: option -%c requires a number", optopt);
                 break;
 
-            case 'u':
-            case 'l':
             case 'I':
             case 'z':
                 log_stderr("twemcache: option -%c requires a string", optopt);
@@ -934,129 +612,6 @@ mc_get_options(int argc, char **argv)
             log_stderr("twemcache: invalid option -- '%c'", optopt);
             return MC_ERROR;
         }
-    }
-
-    if (tcp_specified && !udp_specified) {
-        settings.udpport = settings.port;
-    } else if (udp_specified && !tcp_specified) {
-        settings.port = settings.udpport;
-    }
-
-    return MC_OK;
-}
-
-static rstatus_t
-mc_maximize_core(void)
-{
-    int status;
-    struct rlimit rlim, new_rlim; /* current and new rlimit */
-
-    status = getrlimit(RLIMIT_CORE, &rlim);
-    if (status < 0) {
-        log_stderr("twemcache: getrlimit(RLIMIT_CORE) failed: %s",
-                   strerror(errno));
-        return MC_ERROR;
-    }
-
-    /*
-     * First try raising to infinity. If that fails, try bringing
-     * the soft limit to the current hard limit.
-     */
-    new_rlim.rlim_cur = RLIM_INFINITY;
-    new_rlim.rlim_max = RLIM_INFINITY;
-
-    status = setrlimit(RLIMIT_CORE, &new_rlim);
-    if (status < 0) {
-        new_rlim.rlim_cur = rlim.rlim_max;
-        new_rlim.rlim_max = rlim.rlim_max;
-
-        status = setrlimit(RLIMIT_CORE, &new_rlim);
-        if (status == 0) {
-            return MC_OK;
-        }
-
-        log_stderr("twemcache: setrlimit(RLIMIT_CORE, %"PRIu64") failed: %s",
-                   (uint64_t)rlim.rlim_cur, strerror(errno));
-        return MC_ERROR;
-    }
-
-    return MC_OK;
-}
-
-static rstatus_t
-mc_set_maxconns(void)
-{
-    int status, maxfiles;
-    struct rlimit rlim;
-
-    status = getrlimit(RLIMIT_NOFILE, &rlim);
-    if (status != 0) {
-        log_stderr("twemcache: getrlimit(RLIMIT_NOFILE) failed: %s",
-                   strerror(errno));
-        return MC_ERROR;
-    }
-
-    maxfiles = settings.maxconns;
-
-    rlim.rlim_cur = MAX(rlim.rlim_cur, maxfiles);
-    rlim.rlim_max = MAX(rlim.rlim_max, rlim.rlim_cur);
-
-    status = setrlimit(RLIMIT_NOFILE, &rlim);
-    if (status != 0) {
-        log_stderr("twemcache: setting open files limit to %d failed: %s",
-                   maxfiles, strerror(errno));
-        log_stderr("twemcache: try running as root or request smaller "
-                   "--max-conns value");
-        return MC_ERROR;
-    }
-
-    return MC_OK;
-}
-
-static rstatus_t
-mc_set_user(void)
-{
-    int status;
-    struct passwd *pw;
-    uid_t uid, euid;
-    char *uname;
-
-    uname = settings.username;
-
-    uid = getuid();
-    euid = geteuid();
-
-    if (uid != 0 && euid != 0) {
-        if (uname != NULL) {
-            log_stderr("twemcache: -u option is only effective when run "
-                       "as root");
-            return MC_ERROR;
-        }
-        return MC_OK;
-    }
-
-    if (uname == NULL) {
-        log_stderr("twemcache: cannot run as root without the -u option");
-        return MC_ERROR;
-    }
-
-    pw = getpwnam(settings.username);
-    if (pw == NULL) {
-        log_stderr("twemcache: cannot find user '%s' to switch to", uname);
-        return MC_ERROR;
-    }
-
-    status = setgid(pw->pw_gid);
-    if (status < 0) {
-        log_stderr("twemcache: setting group id to user '%s' failed: %s",
-                   uname, strerror(errno));
-    }
-
-    status = setuid(pw->pw_uid);
-    if (status < 0) {
-        log_stderr("twemcache: setting user id to user '%s' failed: %s",
-                   uname, strerror(errno));
-        return MC_ERROR;
     }
 
     return MC_OK;
@@ -1238,14 +793,13 @@ static void
 mc_print(void)
 {
     loga("%s-%s started on pid %d with %d worker threads", PACKAGE,
-         MC_VERSION_STRING, settings.pid, settings.num_workers);
+         MC_VERSION_STRING, getpid(), settings.num_workers);
 
-    loga("configured with debug logs %s, asserts %s, panic %s, stats %s, "
-         "klog %s", MC_DEBUG_LOG ? "enabled" : "disabled",
+    loga("configured with debug logs %s, asserts %s, panic %s, stats %s ",
+         MC_DEBUG_LOG ? "enabled" : "disabled",
          MC_ASSERT_LOG ? "enabled" : "disabled",
          MC_ASSERT_PANIC ? "enabled" : "disabled",
-         MC_DISABLE_STATS ? "disabled" : "enabled",
-         MC_DISABLE_KLOG ? "disabled" : "enabled");
+         MC_DISABLE_STATS ? "disabled" : "enabled");
 
     slab_print();
 }
@@ -1281,41 +835,8 @@ main(int argc, char **argv)
         exit(0);
     }
 
-    if (settings.max_corefile) {
-        status = mc_maximize_core();
-        if (status != MC_OK) {
-            exit(1);
-        }
-    }
-
-    status = mc_set_maxconns();
-    if (status != MC_OK) {
-        exit(1);
-    }
-
-    status = mc_set_user();
-    if (status != MC_OK) {
-        exit(1);
-    }
-
     if (settings.daemonize) {
-        status = mc_daemonize(settings.max_corefile);
-        if (status != MC_OK) {
-            exit(1);
-        }
-    }
-
-    settings.pid = getpid();
-
-    if (settings.pid_filename != NULL) {
-        status = mc_create_pidfile();
-        if (status != MC_OK) {
-            exit(1);
-        }
-    }
-
-    if (settings.lock_page) {
-        status = mc_lock_page();
+        status = mc_daemonize(false);
         if (status != MC_OK) {
             exit(1);
         }
@@ -1337,8 +858,6 @@ main(int argc, char **argv)
     if (status != MC_OK) {
         exit(1);
     }
-
-    mc_remove_pidfile();
 
     return 0;
 }

@@ -46,34 +46,12 @@
     ACTION( conn_curr,          STATS_GAUGE,        "# active connections")                                 \
     ACTION( data_read,          STATS_COUNTER,      "# bytes read")                                         \
     ACTION( data_written,       STATS_COUNTER,      "# bytes written")                                      \
-    ACTION( add,                STATS_COUNTER,      "# add requests")                                       \
-    ACTION( add_exist,          STATS_COUNTER,      "# add requests that was a hit")                        \
     ACTION( set,                STATS_COUNTER,      "# set requests")                                       \
-    ACTION( replace,            STATS_COUNTER,      "# replace requests")                                   \
-    ACTION( replace_miss,       STATS_COUNTER,      "# replace requests that was a miss")                   \
-    ACTION( append,             STATS_COUNTER,      "# append requests")                                    \
-    ACTION( append_miss,        STATS_COUNTER,      "# append requests that was a miss")                    \
-    ACTION( prepend,            STATS_COUNTER,      "# prepend requests")                                   \
-    ACTION( prepend_miss,       STATS_COUNTER,      "# prepend requests that was a miss")                   \
-    ACTION( delete,             STATS_COUNTER,      "# delete requests")                                    \
-    ACTION( delete_miss,        STATS_COUNTER,      "# delete requests that was a miss")                    \
-    ACTION( incr,               STATS_COUNTER,      "# incr requests")                                      \
-    ACTION( incr_miss,          STATS_COUNTER,      "# incr requests that was a miss")                      \
-    ACTION( decr,               STATS_COUNTER,      "# decr requests")                                      \
-    ACTION( decr_miss,          STATS_COUNTER,      "# decr requests that was a miss")                      \
-    ACTION( cas,                STATS_COUNTER,      "# cas requests")                                       \
-    ACTION( cas_miss,           STATS_COUNTER,      "# cas requests that was a miss")                       \
     ACTION( get,                STATS_COUNTER,      "# get requests")                                       \
     ACTION( get_miss,           STATS_COUNTER,      "# get requests that was a miss")                       \
-    ACTION( gets,               STATS_COUNTER,      "# gets requests")                                      \
-    ACTION( gets_miss,          STATS_COUNTER,      "# gets requests that was a miss")                      \
-    ACTION( flush,              STATS_COUNTER,      "# flush requests")                                     \
     ACTION( stats,              STATS_COUNTER,      "# stats requests")                                     \
     ACTION( cmd_error,          STATS_COUNTER,      "# invalid requests")                                   \
     ACTION( server_error,       STATS_COUNTER,      "# requests that resulted in server errors")            \
-    ACTION( klog_logged,        STATS_COUNTER,      "# commands logged in buffer when klog is turned on")   \
-    ACTION( klog_discarded,     STATS_COUNTER,      "# commands discarded when klog is turned on")          \
-    ACTION( klog_skipped,       STATS_COUNTER,      "# commands skipped by sampling when klog is turned on")\
 
 
 #define STATS_SLAB_METRICS(ACTION)                                                                          \
@@ -99,23 +77,7 @@
     ACTION( slab_new_ts,        STATS_TIMESTAMP,    "the last newly allocated slab timestamp")              \
     ACTION( slab_evict_ts,      STATS_TIMESTAMP,    "the last slab evicted timestamp")                      \
     ACTION( set_success,        STATS_COUNTER,      "# set requests tht was a success")                     \
-    ACTION( add_success,        STATS_COUNTER,      "# add requests that was a success")                    \
-    ACTION( replace_hit,        STATS_COUNTER,      "# replace requests that was a hit")                    \
-    ACTION( replace_success,    STATS_COUNTER,      "# replace requests that was a success")                \
-    ACTION( append_hit,         STATS_COUNTER,      "# append requests that was a hit")                     \
-    ACTION( append_success,     STATS_COUNTER,      "# append requests that was a success")                 \
-    ACTION( prepend_hit,        STATS_COUNTER,      "# prepend requests that was a hit")                    \
-    ACTION( prepend_success,    STATS_COUNTER,      "# prepend requests that was a success")                \
-    ACTION( delete_hit,         STATS_COUNTER,      "# delete requests that was a hit")                     \
-    ACTION( incr_hit,           STATS_COUNTER,      "# incr requests that was a hit")                       \
-    ACTION( incr_success,       STATS_COUNTER,      "# incr requests that was a success")                   \
-    ACTION( decr_hit,           STATS_COUNTER,      "# decr requests that was a hit")                       \
-    ACTION( decr_success,       STATS_COUNTER,      "# decr requests that was a success")                   \
-    ACTION( cas_badval,         STATS_COUNTER,      "# cas requests that resulted in exists")               \
-    ACTION( cas_hit,            STATS_COUNTER,      "# cas requests that was a hit")                        \
-    ACTION( cas_success,        STATS_COUNTER,      "# cas requests that was a success")                    \
     ACTION( get_hit,            STATS_COUNTER,      "# get requests that was a hit")                        \
-    ACTION( gets_hit,           STATS_COUNTER,      "# gets requests that was a hit")                       \
 
 #define STATS_MIN_INTVL     10000    /* min aggregation interval in usec */
 #define STATS_MAX_INTVL     60000000 /* max aggregation interval in usec */
@@ -241,7 +203,6 @@ void _stats_slab_decr_by(uint8_t cls_id, stats_smetric_t name, int64_t delta);
 void stats_default(struct conn *c);
 void stats_settings(void *c);
 void stats_slabs(struct conn *c);
-void stats_sizes(void *c);
 void stats_append(struct conn *c, const char *key, uint16_t klen, char *val, uint32_t vlen);
 
 #endif

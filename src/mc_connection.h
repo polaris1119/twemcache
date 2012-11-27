@@ -30,14 +30,6 @@
 #ifndef _MC_CONNECTION_H_
 #define _MC_CONNECTION_H_
 
-/*
- * Default and high watermark sizes of various connection
- * related buffers
- */
-#define UDP_HEADER_SIZE      8
-#define UDP_BUFFER_SIZE      65536
-#define UDP_MAX_PAYLOAD_SIZE 1400
-
 #define TCP_BUFFER_SIZE      2048
 
 #define RSIZE_HIGHWAT        8192
@@ -126,16 +118,7 @@ struct conn {
     char                 *req;             /* request header */
     int                  req_len;          /* request header length */
 
-    char                 peer[32];         /* printable host:port, possibly truncated */
-
-    int                  udp_rid;          /* udp request id */
-    struct sockaddr      udp_raddr;        /* udp request address */
-    socklen_t            udp_raddr_size;   /* udp request address size */
-    unsigned char        *udp_hbuf;        /* udp header */
-    int                  udp_hsize;        /* udp header size */
-
     unsigned             noreply:1;        /* noreply? */
-    unsigned             udp:1;            /* udp? */
 };
 
 STAILQ_HEAD(conn_tqh, conn);
@@ -153,17 +136,15 @@ struct conn *conn_cq_pop(struct conn_q *cq);
 void conn_init(void);
 void conn_deinit(void);
 
-struct conn *conn_get(int sd, conn_state_t state, int ev_flags, int rsize, int udp);
+struct conn *conn_get(int sd, conn_state_t state, int ev_flags, int rsize);
 void conn_put(struct conn *c);
 
 void conn_cleanup(struct conn *c);
 void conn_close(struct conn *c);
 void conn_shrink(struct conn *c);
 
-rstatus_t conn_add_iov(struct conn *c, const void *buf, int len);
+rstatus_t conn_add_iov(struct conn *c, void *buf, int len);
 rstatus_t conn_add_msghdr(struct conn *c);
-
-rstatus_t conn_build_udp_headers(struct conn *c);
 
 void conn_set_state(struct conn *c, conn_state_t state);
 

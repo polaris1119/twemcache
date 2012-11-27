@@ -5,6 +5,7 @@ AM_CPPFLAGS = -D_GNU_SOURCE
 AM_CFLAGS = -Wall
 AM_CFLAGS += -Wmissing-prototypes -Wmissing-declarations -Wredundant-decls
 AM_CFLAGS += -fno-strict-aliasing
+AM_CFLAGS += -Wunused-function -Wunused-value -Wunused-variable
 
 LDFLAGS += -rdynamic
 
@@ -24,5 +25,4 @@ twemcache_SOURCES =			\
 	mc_time.c mc_time.h		\
 	mc_queue.h			\
 	mc_cache.c mc_cache.h		\
-	mc_klog.c mc_klog.h		\
 	mc.c

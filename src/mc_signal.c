@@ -74,9 +74,6 @@ signal_deinit(void)
 {
 }
 
-#if __GNUC__ >= 4 && __GNUC_MINOR__ >= 6
-#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
-#endif
 void
 signal_handler(int signo)
 {
@@ -144,6 +141,3 @@ signal_handler(int signo)
         exit(1);
     }
 }
-#if __GNUC__ >= 4 && __GNUC_MINOR__ >= 6
-#pragma GCC diagnostic pop
-#endif

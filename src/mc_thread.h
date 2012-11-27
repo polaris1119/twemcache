@@ -60,7 +60,6 @@ struct thread_worker {
     pthread_mutex_t     *stats_mutex;      /* lock for stats update/aggregation */
     struct stats_metric *stats_thread;     /* per-thread thread-level stats */
     struct stats_metric **stats_slabs;     /* per-thread slab-level stats */
-    struct kbuf         *kbuf;             /* per-thread klog buffer */
 };
 
 /*
@@ -127,6 +126,6 @@ void *thread_get(pthread_key_t key);
 
 rstatus_t thread_init(struct event_base *main_base);
 void thread_deinit(void);
-rstatus_t thread_dispatch(int sd, conn_state_t state, int ev_flags, int udp);
+rstatus_t thread_dispatch(int sd, conn_state_t state, int ev_flags);
 
 #endif

@@ -95,10 +95,6 @@ conn_free(struct conn *c)
 {
     log_debug(LOG_VVERB, "free conn %p c %d", c, c->sd);
 
-    if (c->udp_hbuf != NULL) {
-        mc_free(c->udp_hbuf);
-    }
-
     if (c->msg != NULL) {
         mc_free(c->msg);
     }
@@ -165,7 +161,7 @@ _conn_get(void)
 }
 
 struct conn *
-conn_get(int sd, conn_state_t state, int ev_flags, int rsize, int udp)
+conn_get(int sd, conn_state_t state, int ev_flags, int rsize)
 {
     struct conn *c;
 
@@ -256,11 +252,6 @@ conn_get(int sd, conn_state_t state, int ev_flags, int rsize, int udp)
     c->req = NULL;
     c->req_len = 0;
 
-    c->udp = udp;
-    c->udp_rid = 0;
-    c->udp_hbuf = NULL;
-    c->udp_hsize = 0;
-
     c->noreply = 0;
 
     stats_thread_incr(conn_total);
@@ -345,10 +336,6 @@ void
 conn_shrink(struct conn *c)
 {
     ASSERT(c != NULL);
-
-    if (c->udp) {
-        return;
-    }
 
     if (c->rsize > RSIZE_HIGHWAT && c->rbytes < TCP_BUFFER_SIZE) {
         char *newbuf;
@@ -459,62 +446,37 @@ conn_ensure_iov_space(struct conn *c)
  * Returns 0 on success, -1 on out-of-memory.
  */
 rstatus_t
-conn_add_iov(struct conn *c, const void *buf, int len)
+conn_add_iov(struct conn *c, void *buf, int len)
 {
     struct msghdr *m;
-    int leftover;
-    bool limit_to_mtu;
+    rstatus_t status;
 
-    ASSERT(c != NULL);
+    ASSERT(c->msg_used >= 1);
 
-    do {
-        rstatus_t status;
+    m = &c->msg[c->msg_used - 1];
 
-        ASSERT(c->msg_used >= 1);
-
-        m = &c->msg[c->msg_used - 1];
-
-        /*
-         * Limit UDP packets, and the first payloads of TCP replies, to
-         * UDP_MAX_PAYLOAD_SIZE bytes.
-         */
-        limit_to_mtu = c->udp || (1 == c->msg_used);
-
-        /* We may need to start a new msghdr if this one is full. */
-        if (m->msg_iovlen == IOV_MAX ||
-            (limit_to_mtu && c->msg_bytes >= UDP_MAX_PAYLOAD_SIZE)) {
-            status = conn_add_msghdr(c);
-            if (status != MC_OK) {
-                return status;
-            }
-        }
-
-        status = conn_ensure_iov_space(c);
+    /* we may need to start a new msghdr if this one is full */
+    if (m->msg_iovlen == IOV_MAX) {
+        status = conn_add_msghdr(c);
         if (status != MC_OK) {
             return status;
         }
+    }
 
-        /* if the fragment is too big to fit in the datagram, split it up */
-        if (limit_to_mtu && len + c->msg_bytes > UDP_MAX_PAYLOAD_SIZE) {
-            leftover = len + c->msg_bytes - UDP_MAX_PAYLOAD_SIZE;
-            len -= leftover;
-        } else {
-            leftover = 0;
-        }
+    status = conn_ensure_iov_space(c);
+    if (status != MC_OK) {
+        return status;
+    }
 
-        ASSERT(c->msg_used >= 1);
+    ASSERT(c->msg_used >= 1);
 
-        m = &c->msg[c->msg_used - 1];
-        m->msg_iov[m->msg_iovlen].iov_base = (void *)buf;
-        m->msg_iov[m->msg_iovlen].iov_len = len;
+    m = &c->msg[c->msg_used - 1];
+    m->msg_iov[m->msg_iovlen].iov_base = buf;
+    m->msg_iov[m->msg_iovlen].iov_len = len;
 
-        c->msg_bytes += len;
-        c->iov_used++;
-        m->msg_iovlen++;
-
-        buf = ((char *)buf) + len;
-        len = leftover;
-    } while (leftover > 0);
+    c->msg_bytes += len;
+    c->iov_used++;
+    m->msg_iovlen++;
 
     return MC_OK;
 }
@@ -528,8 +490,6 @@ rstatus_t
 conn_add_msghdr(struct conn *c)
 {
     struct msghdr *msg;
-
-    ASSERT(c != NULL);
 
     if (c->msg_size == c->msg_used) {
         msg = mc_realloc(c->msg, c->msg_size * 2 * sizeof(*c->msg));
@@ -545,64 +505,8 @@ conn_add_msghdr(struct conn *c)
     memset(msg, 0, sizeof(*msg));
 
     msg->msg_iov = &c->iov[c->iov_used];
-
-    if (c->udp) {
-        msg->msg_name = &c->udp_raddr;
-        msg->msg_namelen = c->udp_raddr_size;
-    }
-
     c->msg_bytes = 0;
     c->msg_used++;
-
-    if (c->udp) {
-        /* leave room for the UDP header, which we'll fill in later */
-        return conn_add_iov(c, NULL, UDP_HEADER_SIZE);
-    }
-
-    return MC_OK;
-}
-
-/*
- * Constructs a set of UDP headers and attaches them to the outgoing
- * messages.
- */
-rstatus_t
-conn_build_udp_headers(struct conn *c)
-{
-    int i;
-    unsigned char *hdr;
-
-    ASSERT(c != NULL);
-
-    if (c->msg_used > c->udp_hsize) {
-        void *new_udp_hbuf;
-
-        if (c->udp_hbuf != NULL) {
-            new_udp_hbuf = mc_realloc(c->udp_hbuf, c->msg_used * 2 * UDP_HEADER_SIZE);
-        } else {
-            new_udp_hbuf = mc_alloc(c->msg_used * 2 * UDP_HEADER_SIZE);
-        }
-        if (new_udp_hbuf == NULL) {
-            return MC_ENOMEM;
-        }
-        c->udp_hbuf = (unsigned char *)new_udp_hbuf;
-        c->udp_hsize = c->msg_used * 2;
-    }
-
-    hdr = c->udp_hbuf;
-    for (i = 0; i < c->msg_used; i++) {
-        c->msg[i].msg_iov[0].iov_base = (void*)hdr;
-        c->msg[i].msg_iov[0].iov_len = UDP_HEADER_SIZE;
-        *hdr++ = c->udp_rid / 256;
-        *hdr++ = c->udp_rid % 256;
-        *hdr++ = i / 256;
-        *hdr++ = i % 256;
-        *hdr++ = c->msg_used / 256;
-        *hdr++ = c->msg_used % 256;
-        *hdr++ = 0;
-        *hdr++ = 0;
-        ASSERT((void *) hdr == (caddr_t)c->msg[i].msg_iov[0].iov_base + UDP_HEADER_SIZE);
-    }
 
     return MC_OK;
 }

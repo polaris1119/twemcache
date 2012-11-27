@@ -57,12 +57,6 @@
 # define MC_DISABLE_STATS 0
 #endif
 
-#ifdef DISABLE_KLOG
-# define MC_DISABLE_KLOG 1
-#else
-# define MC_DISABLE_KLOG 0
-#endif
-
 #ifdef HAVE_LITTLE_ENDIAN
 # define MC_LITTLE_ENDIAN 1
 #endif
@@ -135,22 +129,8 @@ struct slabclass;
 #define REQ_CODEC(ACTION)                                       \
     ACTION( UNKNOWN,    0,          0,        0,        0   )   \
     ACTION( SET,        6,          6,        7,        7   )   \
-    ACTION( ADD,        6,          6,        7,        7   )   \
-    ACTION( REPLACE,    6,          6,        7,        7   )   \
-    ACTION( APPEND,     6,          6,        7,        7   )   \
-    ACTION( PREPEND,    6,          6,        7,        7   )   \
-    ACTION( CAS,        7,          7,        8,        8   )   \
     ACTION( GET,        3,    INT_MAX,        3,  INT_MAX   )   \
-    ACTION( GETS,       3,    INT_MAX,        3,  INT_MAX   )   \
-    ACTION( INCR,       4,          4,        5,        5   )   \
-    ACTION( DECR,       4,          4,        5,        5   )   \
-    ACTION( DELETE,     3,          3,        4,        4   )   \
-    ACTION( QUIT,       2,          2,        2,        2   )   \
     ACTION( STATS,      2,          5,        2,        5   )   \
-    ACTION( CONFIG,     3,          5,        3,        5   )   \
-    ACTION( VERSION,    2,          2,        2,        2   )   \
-    ACTION( FLUSHALL,   2,          3,        3,        4   )   \
-    ACTION( VERBOSITY,  3,          4,        3,        4   )   \
 
 /*
  *          response type
@@ -158,12 +138,8 @@ struct slabclass;
 #define RSP_CODEC(ACTION)   \
     ACTION( NOT_STORED    ) \
     ACTION( STORED        ) \
-    ACTION( EXISTS        ) \
-    ACTION( NOT_FOUND     ) \
-    ACTION( DELETED       ) \
     ACTION( CLIENT_ERROR  ) \
     ACTION( SERVER_ERROR  ) \
-    ACTION( OK            ) \
 
 #define KEY_MAX_LEN     250 /* max key length */
 
@@ -209,7 +185,6 @@ typedef enum rsp_type {
 #include <mc_thread.h>
 #include <mc_slabs.h>
 #include <mc_stats.h>
-#include <mc_klog.h>
 #include <mc_assoc.h>
 #include <mc_items.h>
 #include <mc_signal.h>
@@ -219,11 +194,7 @@ typedef enum rsp_type {
 struct settings {
                                                   /* options with no argument */
 
-    bool            prealloc;                     /* memory  : whether we preallocate for slabs */
-    bool            lock_page;                    /* memory  : whether to lock allcoated pages */
     bool            daemonize;                    /* process : daemonized or not */
-    bool            max_corefile;                 /* process : maximize core core file limit */
-    bool            use_cas;                      /* protocol: whether cas is supported */
 
                                                   /* options with required argument */
 
@@ -231,24 +202,13 @@ struct settings {
     int             verbose;                      /* debug   : log verbosity level */
 
     struct timeval  stats_agg_intvl;              /* stats   : how often we aggregate stats */
-    char            *klog_name;                   /* klog    : name of the command log */
-    char            *klog_backup;                 /* klog    : name of the backup after log rotation */
-    int             klog_sampling_rate;           /* klog    : log every klog_smp_rate messages */
-    int             klog_entry;                   /* klog    : number of entry to buffer per thread */
-    struct timeval  klog_intvl;                   /* klog    : how often the command logger collector thread runs */
-    bool            klog_running;                 /* klog    : klog running? apply to both read and write */
 
     int             num_workers;                  /* process : number of workers driven by libevent */
-    char            *username;                    /* process : run as another user */
 
     int             reqs_per_event;               /* network : max # of requests to process per io event */
     int             maxconns;                     /* network : max connections */
     int             backlog;                      /* network : tcp backlog */
     int             port;                         /* network : tcp listening port */
-    int             udpport;                      /* network : udp listening port */
-    char            *interface;                   /* network : listening interface */
-    char            *socketpath;                  /* network : path to unix socket if used */
-    int             access;                       /* network : access mask for unix socket */
 
     int             evict_opt;                    /* memory  : eviction */
     bool            use_freeq;                    /* memory  : whether use items in freeq or not */
@@ -264,10 +224,6 @@ struct settings {
 
     bool            accepting_conns;              /* network : whether we accept new connections */
     rel_time_t      oldest_live;                  /* data    : ignore existing items older than this */
-
-    pid_t           pid;                          /* process : pid */
-    char            *pid_filename;                /* process : pid file */
-    unsigned        pid_file:1;                   /* process : pid file created? */
 
     size_t          profile[SLABCLASS_MAX_IDS];   /* memory  : slab profile */
     uint8_t         profile_last_id;              /* memory  : last id in slab profile */

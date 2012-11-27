@@ -117,46 +117,6 @@ core_parse(struct conn *c)
 }
 
 /*
- * Read a UDP request
- */
-static read_result_t
-core_read_udp(struct conn *c)
-{
-    int res;
-
-    c->udp_raddr_size = sizeof(c->udp_raddr);
-    res = recvfrom(c->sd, c->rbuf, c->rsize,
-                   0, &c->udp_raddr, &c->udp_raddr_size);
-    if (res > 8) {
-        unsigned char *buf = (unsigned char *)c->rbuf;
-
-        stats_thread_incr_by(data_read, res);
-
-        /* beginning of UDP packet is the request ID; save it */
-        c->udp_rid = buf[0] * 256 + buf[1];
-
-        /* if this is a multi-packet request, drop it */
-        if (buf[4] != 0 || buf[5] != 1) {
-            log_warn("server error: multipacket req not supported");
-
-            asc_write_server_error(c);
-            return READ_NO_DATA_RECEIVED;
-        }
-
-        /* don't care about any of the rest of the header */
-        res -= 8;
-        memmove(c->rbuf, c->rbuf + 8, res);
-
-        c->rbytes += res;
-        c->rcurr = c->rbuf;
-
-        return READ_DATA_RECEIVED;
-    }
-
-    return READ_NO_DATA_RECEIVED;
-}
-
-/*
  * Read from network as much as we can, handle buffer overflow and connection
  * close. Before reading, move the remaining incomplete fragment of a command
  * (if any) to the beginning of the buffer.
@@ -245,7 +205,7 @@ core_read(struct conn *c)
 {
     read_result_t result;
 
-    result = c->udp ? core_read_udp(c) : core_read_tcp(c);
+    result = core_read_tcp(c);
     switch (result) {
     case READ_NO_DATA_RECEIVED:
         conn_set_state(c, CONN_WAIT);
@@ -417,11 +377,7 @@ core_transmit(struct conn *c)
         log_debug(LOG_ERR, "failed to write, and not due to blocking: %s",
                   strerror(errno));
 
-        if (c->udp) {
-            conn_set_state(c, CONN_READ);
-        } else {
-            conn_set_state(c, CONN_CLOSE);
-        }
+        conn_set_state(c, CONN_CLOSE);
 
         return TRANSMIT_HARD_ERROR;
     } else {
@@ -433,12 +389,7 @@ static void
 core_close(struct conn *c)
 {
     log_debug(LOG_NOTICE, "close c %d", c->sd);
-
-    if (c->udp) {
-        conn_cleanup(c);
-    } else {
-        conn_close(c);
-    }
+    conn_close(c);
 }
 
 static void
@@ -495,7 +446,7 @@ core_accept(struct conn *c)
                  c->sd, strerror(errno));
     }
 
-    status = thread_dispatch(sd, CONN_NEW_CMD, EV_READ | EV_PERSIST, 0);
+    status = thread_dispatch(sd, CONN_NEW_CMD, EV_READ | EV_PERSIST);
     if (status != MC_OK) {
         log_error("dispatch c %d from s %d failed: %s", sd, c->sd,
                   strerror(errno));
@@ -684,9 +635,9 @@ core_drive_machine(struct conn *c)
             /*
              * We want to write out a simple response. If we haven't already,
              * assemble it into a msgbuf list (this will be a single-entry
-             * list for TCP or a two-entry list for UDP).
+             * list for TCP).
              */
-            if (c->iov_used == 0 || (c->udp && c->iov_used == 1)) {
+            if (c->iov_used == 0) {
                 status = conn_add_iov(c, c->wcurr, c->wbytes);
                 if (status != MC_OK) {
                     log_debug(LOG_INFO, "couldn't build response: %s",
@@ -699,13 +650,6 @@ core_drive_machine(struct conn *c)
             /* fall through */
 
         case CONN_MWRITE:
-            if (c->udp && c->msg_curr == 0 && conn_build_udp_headers(c) != MC_OK) {
-                log_debug(LOG_INFO, "failed to build UDP headers: %s",
-                      strerror(errno));
-                conn_set_state(c, CONN_CLOSE);
-                break;
-            }
-
             switch (core_transmit(c)) {
             case TRANSMIT_COMPLETE:
                 if (c->state == CONN_MWRITE) {
@@ -778,7 +722,7 @@ core_event_handler(int sd, short which, void *arg)
 }
 
 static rstatus_t
-core_create_inet_socket(int port, int udp)
+core_create_inet_socket(int port)
 {
     rstatus_t status;
     int sd;
@@ -789,15 +733,15 @@ core_create_inet_socket(int port, int udp)
     int error;
     int success = 0;
 
-    hints.ai_socktype = udp ? SOCK_DGRAM : SOCK_STREAM;
+    hints.ai_socktype = SOCK_STREAM;
 
     if (port == -1) {
         port = 0;
     }
     snprintf(port_buf, sizeof(port_buf), "%d", port);
-    error = getaddrinfo(settings.interface, port_buf, &hints, &ai);
+    error = getaddrinfo(NULL, port_buf, &hints, &ai);
     if (error != 0) {
-        log_error("getaddrinfo() failed: %s", gai_strerror(error));
+        log_error("getaddrinfo failed: %s", gai_strerror(error));
         return MC_ERROR;
     }
 
@@ -820,26 +764,10 @@ core_create_inet_socket(int port, int udp)
             continue;
         }
 
-#ifdef IPV6_V6ONLY
-        if (next->ai_family == AF_INET6) {
-            int flags = 1;
-            error = setsockopt(sd, IPPROTO_IPV6, IPV6_V6ONLY, (char *) &flags, sizeof(flags));
-            if (error != 0) {
-                log_error("set ipv6 on sd %d failed: %s", sd,
-                          strerror(errno));
-                close(sd);
-                continue;
-            }
-        }
-#endif
         status = mc_set_reuseaddr(sd);
         if (status != MC_OK) {
             log_warn("set reuse addr on sd %d failed, ignored: %s", sd,
                       strerror(errno));
-        }
-
-        if (udp) {
-            mc_maximize_sndbuf(sd);
         }
 
         status = bind(sd, next->ai_addr, next->ai_addrlen);
@@ -856,38 +784,26 @@ core_create_inet_socket(int port, int udp)
 
         success++;
 
-        if (!udp && listen(sd, settings.backlog) == -1) {
+        if (listen(sd, settings.backlog) == -1) {
             log_error("listen on sd %d failed: %s", sd, strerror(errno));
             close(sd);
             freeaddrinfo(ai);
             return MC_ERROR;
         }
 
-        if (udp) {
-            int c;
-
-            for (c = 0; c < settings.num_workers; c++) {
-                /* this is guaranteed to hit all threads because we round-robin */
-                status = thread_dispatch(sd, CONN_READ, EV_READ | EV_PERSIST, 1);
-                if (status != MC_OK) {
-                    return status;
-                }
-            }
-        } else {
-            conn = conn_get(sd, CONN_LISTEN, EV_READ | EV_PERSIST, 1, 0);
-            if (conn == NULL) {
-                log_error("listen on sd %d failed: %s", sd, strerror(errno));
-                return MC_ERROR;
-            }
-            STAILQ_INSERT_HEAD(&listen_connq, conn, c_tqe);
-
-            status = conn_set_event(conn, main_base);
-            if (status != MC_OK) {
-                return status;
-            }
-
-            log_debug(LOG_NOTICE, "s %d listening", conn->sd);
+        conn = conn_get(sd, CONN_LISTEN, EV_READ | EV_PERSIST, 1);
+        if (conn == NULL) {
+            log_error("listen on sd %d failed: %s", sd, strerror(errno));
+            return MC_ERROR;
         }
+        STAILQ_INSERT_HEAD(&listen_connq, conn, c_tqe);
+
+        status = conn_set_event(conn, main_base);
+        if (status != MC_OK) {
+            return status;
+        }
+
+        log_debug(LOG_NOTICE, "s %d listening", conn->sd);
    }
 
     freeaddrinfo(ai);
@@ -896,118 +812,9 @@ core_create_inet_socket(int port, int udp)
 }
 
 static rstatus_t
-core_create_unix_socket(char *path, int mask)
-{
-    rstatus_t status;
-    int sd, old_mask;
-    struct sockaddr_un addr;
-    struct conn *c;
-
-    ASSERT(path != NULL);
-
-    sd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (sd < 0) {
-        log_error("socket failed: %s", strerror(errno));
-        return MC_ERROR;
-    }
-
-    status = mc_set_nonblocking(sd);
-    if (status != MC_OK) {
-        log_error("set noblock on sd %d failed: %s", sd, strerror(errno));
-        close(sd);
-        return status;
-    }
-
-    /*
-     * bind() will fail if the path already exist. So, we call unlink()
-     * to delete the path, in case it already exists. If it does not
-     * exist, unlink() returns error, which we ignore
-     */
-    unlink(path);
-
-    status = mc_set_reuseaddr(sd);
-    if (status != MC_OK) {
-        log_warn("set reuse addr on sd %d failed, ignored: %s", sd,
-                 strerror(errno));
-    }
-
-    status = mc_set_keepalive(sd);
-    if (status != MC_OK) {
-        log_warn("set keepalive on sd %d failed, ignored: %s", sd,
-                 strerror(errno));
-    }
-
-    status = mc_unset_linger(sd);
-    if (status != MC_OK) {
-        log_warn("unset linger on sd %d failed, ignored: %s", sd,
-                 strerror(errno));
-    }
-
-    memset(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
-    ASSERT(strcmp(addr.sun_path, path) == 0);
-
-    old_mask = umask(~(mask & 0777));
-
-    status = bind(sd, (struct sockaddr *)&addr, sizeof(addr));
-    if (status != MC_OK) {
-        log_error("bind on sd %d failed: %s", sd, strerror(errno));
-        close(sd);
-        umask(old_mask);
-        return status;
-    }
-
-    umask(old_mask);
-
-    status = listen(sd, settings.backlog);
-    if (status != MC_OK) {
-        log_error("listen on sd %d failed: %s", sd, strerror(errno));
-        close(sd);
-        return status;
-    }
-
-    c = conn_get(sd, CONN_LISTEN, EV_READ | EV_PERSIST, 1, 0);
-    if (c == NULL) {
-        log_error("listen on sd %d failed: %s", sd, strerror(errno));
-        return MC_ERROR;
-    }
-
-    status = conn_set_event(c, main_base);
-    if (status != MC_OK) {
-        conn_put(c);
-        return status;
-    }
-
-    STAILQ_INSERT_HEAD(&listen_connq, c, c_tqe);
-
-    return MC_OK;
-}
-
-static rstatus_t
 core_create_socket(void)
 {
-    rstatus_t status;
-
-    if (settings.socketpath != NULL) {
-        return core_create_unix_socket(settings.socketpath, settings.access);
-    }
-
-    if (settings.port) {
-        status = core_create_inet_socket(settings.port, 0);
-        if (status != MC_OK) {
-            return status;
-        }
-    }
-
-    if (settings.udpport) {
-        status = core_create_inet_socket(settings.udpport, 1);
-        if (status != MC_OK) {
-            return status;
-        }
-    }
-
-    return MC_OK;
+    return core_create_inet_socket(settings.port);
 }
 
 rstatus_t
@@ -1050,11 +857,6 @@ core_init(void)
 
     stats_init();
 
-    status = klog_init();
-    if (status != MC_OK) {
-        return status;
-    }
-
     time_init();
 
     /* start up worker, dispatcher and aggregator threads */
@@ -1069,7 +871,6 @@ core_init(void)
 void
 core_deinit(void)
 {
-    klog_deinit();
 }
 
 rstatus_t

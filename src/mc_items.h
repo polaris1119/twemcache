@@ -32,24 +32,13 @@
 
 typedef enum item_flags {
     ITEM_LINKED  = 1,  /* item in lru q and hash */
-    ITEM_CAS     = 2,  /* item has cas */
-    ITEM_SLABBED = 4,  /* item in free q */
-    ITEM_RALIGN  = 8,  /* item data (payload) is right-aligned */
+    ITEM_SLABBED = 2,  /* item in free q */
 } item_flags_t;
 
 typedef enum item_store_result {
     NOT_STORED,
     STORED,
-    EXISTS,
-    NOT_FOUND
 } item_store_result_t;
-
-typedef enum item_delta_result {
-    DELTA_OK,
-    DELTA_NON_NUMERIC,
-    DELTA_EOM,
-    DELTA_NOT_FOUND,
-} item_delta_result_t;
 
 /*
  * Every item chunk in the twemcache starts with an header (struct item)
@@ -78,10 +67,9 @@ typedef enum item_delta_result {
  *   |               |       \
  *   \               |       item_key()
  *   item            \
- *                   item->end, (if enabled) item_cas()
+ *                   item->end
  *
  * item->end is followed by:
- * - 8-byte cas, if ITEM_CAS flag is set
  * - key with terminating '\0', length = item->nkey + 1
  * - data with no terminating '\0'
  */
@@ -115,7 +103,6 @@ TAILQ_HEAD(item_tqh, item);
  *
  * The smallest item data is actually a single byte key with a zero byte value
  * which internally is of sizeof("k"), as key is stored with terminating '\0'.
- * If cas is enabled, then item payload should have another 8-byte for cas.
  *
  * The largest item data is actually the room left in the slab_size()
  * slab, after the item header has been factored out
@@ -134,11 +121,6 @@ TAILQ_HEAD(item_tqh, item);
 #endif
 
 static inline bool
-item_has_cas(struct item *it) {
-    return (it->flags & ITEM_CAS);
-}
-
-static inline bool
 item_is_linked(struct item *it) {
     return (it->flags & ITEM_LINKED);
 }
@@ -148,58 +130,20 @@ item_is_slabbed(struct item *it) {
     return (it->flags & ITEM_SLABBED);
 }
 
-static inline bool
-item_is_raligned(struct item *it) {
-    return (it->flags & ITEM_RALIGN);
-}
-
-static inline uint64_t
-item_cas(struct item *it)
-{
-    ASSERT(it->magic == ITEM_MAGIC);
-
-    if (item_has_cas(it)) {
-        return *((uint64_t *)it->end);
-    }
-
-    return 0;
-}
-
-static inline void
-item_set_cas(struct item *it, uint64_t cas)
-{
-    ASSERT(it->magic == ITEM_MAGIC);
-
-    if (item_has_cas(it)) {
-        *((uint64_t *)it->end) = cas;
-    }
-}
-#if __GNUC__ >= 4 && __GNUC_MINOR__ >= 6
-#pragma GCC diagnostic pop
-#endif
-
 static inline char *
 item_key(struct item *it)
 {
-    char *key;
-
     ASSERT(it->magic == ITEM_MAGIC);
 
-    key = it->end;
-    if (item_has_cas(it)) {
-        key += sizeof(uint64_t);
-    }
-
-    return key;
+    return it->end;
 }
 
 static inline size_t
-item_ntotal(uint8_t nkey, uint32_t nbyte, bool use_cas)
+item_ntotal(uint8_t nkey, uint32_t nbyte)
 {
     size_t ntotal;
 
-    ntotal = use_cas ? sizeof(uint64_t) : 0;
-    ntotal += ITEM_HDR_SIZE + nkey + 1 + nbyte;
+    ntotal = ITEM_HDR_SIZE + nkey + 1 + nbyte;
 
     return ntotal;
 }
@@ -210,7 +154,7 @@ item_size(struct item *it)
 
     ASSERT(it->magic == ITEM_MAGIC);
 
-    return item_ntotal(it->nkey, it->nbyte, item_has_cas(it));
+    return item_ntotal(it->nkey, it->nbyte);
 }
 
 void item_init(void);
@@ -230,12 +174,9 @@ void item_delete(struct item *it);
 
 void item_remove(struct item *it);
 void item_touch(struct item *it);
-char *item_cache_dump(uint8_t id, uint32_t limit, uint32_t *bytes);
 
 struct item *item_get(const char *key, size_t nkey);
-void item_flush_expired(void);
 
 item_store_result_t item_store(struct item *it, req_type_t type, struct conn *c);
-item_delta_result_t item_add_delta(struct conn *c, char *key, size_t nkey, int incr, int64_t delta, char *buf);
 
 #endif
