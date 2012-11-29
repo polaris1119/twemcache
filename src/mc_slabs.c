@@ -28,6 +28,7 @@
  */
 
 #include <stdlib.h>
+#include <sys/mman.h>
 
 #include <mc_core.h>
 
@@ -215,19 +216,23 @@ slab_slabclass_deinit(void)
 static rstatus_t
 slab_heapinfo_init(void)
 {
+    size_t size;
+
     heapinfo.nslab = 0;
     heapinfo.max_nslab = settings.maxbytes / settings.slab_size;
 
-    heapinfo.base = mc_alloc(heapinfo.max_nslab * settings.slab_size);
-    if (heapinfo.base == NULL) {
-        log_error("pre-alloc %zu bytes for %"PRIu32" slabs failed: %s",
-                  heapinfo.max_nslab * settings.slab_size,
-                  heapinfo.max_nslab, strerror(errno));
+    size = heapinfo.max_nslab * settings.slab_size;
+
+    heapinfo.base = mmap(NULL, size, PROT_READ | PROT_WRITE,
+                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (heapinfo.base == ((void *) -1)) {
+        log_error("mmap alloc %zu bytes for %"PRIu32" slabs failed: %s",
+                  size, heapinfo.max_nslab, strerror(errno));
         return MC_ENOMEM;
     }
 
     log_debug(LOG_INFO, "pre-allocated %zu bytes for %"PRIu32" slabs",
-              settings.maxbytes, heapinfo.max_nslab);
+              size, heapinfo.max_nslab);
 
     heapinfo.curr = heapinfo.base;
 
@@ -248,6 +253,20 @@ slab_heapinfo_init(void)
 static void
 slab_heapinfo_deinit(void)
 {
+    int status;
+    size_t size;
+
+    if (heapinfo.base == NULL) {
+        return;
+    }
+
+    size = heapinfo.max_nslab * settings.slab_size;
+
+    status = munmap(heapinfo.base, size);
+    if (status < 0) {
+        log_error("munmap %zu bytes at %p addr failed, ignored: %s,", size,
+                  heapinfo.base, strerror(errno));
+    }
 }
 
 /*
