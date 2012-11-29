@@ -223,8 +223,17 @@ slab_heapinfo_init(void)
 
     size = heapinfo.max_nslab * settings.slab_size;
 
+    int fd = open("/dev/sdb", O_RDWR, 0644);
+    if (fd < 0) {
+        log_error("open /dev/sdb failed: %s", strerror(errno));
+        return MC_ERROR;
+    }
+
+//    heapinfo.base = mmap(NULL, size, PROT_READ | PROT_WRITE,
+//                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+
     heapinfo.base = mmap(NULL, size, PROT_READ | PROT_WRITE,
-                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+                         MAP_SHARED, fd, 0);
     if (heapinfo.base == ((void *) -1)) {
         log_error("mmap alloc %zu bytes for %"PRIu32" slabs failed: %s",
                   size, heapinfo.max_nslab, strerror(errno));
@@ -522,6 +531,8 @@ slab_add_one(struct slab *slab, uint8_t id)
     struct slabclass *p;
     struct item *it;
     uint32_t i, offset;
+
+	//msync(heapinfo.base,heapinfo.max_nslab * settings.slab_size, 0);
 
     p = &slabclass[id];
 
