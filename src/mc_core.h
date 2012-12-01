@@ -211,7 +211,6 @@ struct settings {
     int             port;                         /* network : tcp listening port */
 
     int             evict_opt;                    /* memory  : eviction */
-    bool            use_freeq;                    /* memory  : whether use items in freeq or not */
     bool            use_lruq;                     /* memory  : whether use items in freeq or not */
     double          factor;                       /* memory  : chunk size growth factor */
     size_t          maxbytes;                     /* memory  : maximum bytes allowed for slabs */

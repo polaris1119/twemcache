@@ -192,9 +192,6 @@ slab_slabclass_init(void)
         p->nitem = nitem;
         p->size = item_sz;
 
-        p->nfree_itemq = 0;
-        TAILQ_INIT(&p->free_itemq);
-
         p->nfree_item = 0;
         p->free_item = NULL;
     }
@@ -430,7 +427,7 @@ slab_evict_one(struct slab *slab)
         p->free_item = NULL;
     }
 
-    /* delete slab items either from hash + lru Q or free Q */
+    /* delete slab items either from hash + lru Q */
     for (i = 0; i < p->nitem; i++) {
         it = slab_2_item(slab, i, p->size);
 
@@ -442,13 +439,9 @@ slab_evict_one(struct slab *slab)
             item_reuse(it);
         } else if (item_is_slabbed(it)) {
             ASSERT(slab == item_2_slab(it));
-            ASSERT(!TAILQ_EMPTY(&p->free_itemq));
 
             it->flags &= ~ITEM_SLABBED;
 
-            ASSERT(p->nfree_itemq > 0);
-            p->nfree_itemq--;
-            TAILQ_REMOVE(&p->free_itemq, it, i_tqe);
             stats_slab_decr(slab->id, item_free);
         }
     }
@@ -575,7 +568,6 @@ slab_get(uint8_t id)
     stats_slab_settime(id, slab_req_ts, time_now());
 
     ASSERT(slabclass[id].free_item == NULL);
-    ASSERT(TAILQ_EMPTY(&slabclass[id].free_itemq));
 
     slab = slab_get_new();
 
@@ -603,44 +595,6 @@ slab_get(uint8_t id)
 }
 
 /*
- * Get an item from the item free q of the given slab with id.
- */
-static struct item *
-slab_get_item_from_freeq(uint8_t id)
-{
-    struct slabclass *p; /* parent slabclass */
-    struct item *it;
-
-    if (!settings.use_freeq) {
-        return NULL;
-    }
-
-    p = &slabclass[id];
-
-    if (p->nfree_itemq == 0) {
-        return NULL;
-    }
-
-    it = TAILQ_FIRST(&p->free_itemq);
-
-    ASSERT(it->magic == ITEM_MAGIC);
-    ASSERT(item_is_slabbed(it));
-    ASSERT(!item_is_linked(it));
-
-    it->flags &= ~ITEM_SLABBED;
-
-    ASSERT(p->nfree_itemq > 0);
-    p->nfree_itemq--;
-    TAILQ_REMOVE(&p->free_itemq, it, i_tqe);
-    stats_slab_decr(id, item_free);
-
-    log_debug(LOG_VERB, "get free q it '%.*s' at offset %"PRIu32" with id "
-              "%"PRIu8"", it->nkey, item_key(it), it->offset, it->id);
-
-    return it;
-}
-
-/*
  * Get an item from the slab with a given id. We get an item either from:
  * 1. item free Q of given slab with id. or,
  * 2. current slab.
@@ -650,18 +604,19 @@ slab_get_item_from_freeq(uint8_t id)
 static struct item *
 _slab_get_item(uint8_t id)
 {
+    rstatus_t status;
     struct slabclass *p;
     struct item *it;
 
     p = &slabclass[id];
 
-    it = slab_get_item_from_freeq(id);
-    if (it != NULL) {
-        return it;
-    }
+    if (p->free_item == NULL) {
+        status = slab_get(id);
+        if (status != MC_OK) {
+            return NULL;
+        }
 
-    if (p->free_item == NULL && (slab_get(id) != MC_OK)) {
-        return NULL;
+        ASSERT(p->free_item != NULL);
     }
 
     /* return item from current slab */
@@ -693,40 +648,11 @@ slab_get_item(uint8_t id)
 }
 
 /*
- * Put an item back into the slab by inserting into the item free Q.
- */
-static void
-slab_put_item_into_freeq(struct item *it)
-{
-    uint8_t id = it->id;
-    struct slabclass *p = &slabclass[id];
-
-    ASSERT(id >= SLABCLASS_MIN_ID && id <= slabclass_max_id);
-    ASSERT(item_2_slab(it)->id == id);
-    ASSERT(!item_is_linked(it));
-    ASSERT(!item_is_slabbed(it));
-    ASSERT(it->refcount == 0);
-    ASSERT(it->offset != 0);
-
-    log_debug(LOG_VERB, "put free q it '%.*s' at offset %"PRIu32" with id "
-              "%"PRIu8"", it->nkey, item_key(it), it->offset, it->id);
-
-    it->flags |= ITEM_SLABBED;
-
-    p->nfree_itemq++;
-    TAILQ_INSERT_HEAD(&p->free_itemq, it, i_tqe);
-
-    stats_slab_incr(id, item_free);
-    stats_slab_incr(id, item_remove);
-}
-
-/*
  * Put an item back into the slab
  */
 static void
 _slab_put_item(struct item *it)
 {
-    slab_put_item_into_freeq(it);
 }
 
 void

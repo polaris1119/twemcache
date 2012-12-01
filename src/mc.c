@@ -313,7 +313,6 @@ mc_set_default_options(void)
     settings.port = MC_TCP_PORT;
 
     settings.evict_opt = MC_EVICT;
-    settings.use_freeq = true;
     settings.use_lruq = true;
     settings.factor = MC_FACTOR;
     settings.maxbytes = MC_MAXBYTES;
@@ -478,7 +477,6 @@ mc_get_options(int argc, char **argv)
             }
             settings.evict_opt = value;
             if (value == EVICT_CS) {
-                settings.use_freeq = false;
                 settings.use_lruq = false;
             }
             break;
