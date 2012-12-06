@@ -486,42 +486,6 @@ item_delete(struct item *it)
 }
 
 /*
- * Touch the item by moving it to the tail of lru q only if it wasn't
- * touched ITEM_UPDATE_INTERVAL secs back.
- */
-static void
-_item_touch(struct item *it)
-{
-    ASSERT(it->magic == ITEM_MAGIC);
-    ASSERT(!item_is_slabbed(it));
-
-    if (it->atime >= (time_now() - ITEM_UPDATE_INTERVAL)) {
-        return;
-    }
-
-    log_debug(LOG_VERB, "update it '%.*s' at offset %"PRIu32" with flags "
-              "%02x id %"PRId8"", it->nkey, item_key(it), it->offset,
-              it->flags, it->id);
-
-    ASSERT(item_is_linked(it));
-
-    item_unlink_q(it);
-    item_link_q(it, false);
-}
-
-void
-item_touch(struct item *it)
-{
-    if (it->atime >= (time_now() - ITEM_UPDATE_INTERVAL)) {
-        return;
-    }
-
-    pthread_mutex_lock(&cache_lock);
-    _item_touch(it);
-    pthread_mutex_unlock(&cache_lock);
-}
-
-/*
  * Replace one item with another in the hash table and lru q.
  */
 static void

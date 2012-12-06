@@ -173,7 +173,6 @@ void item_reuse(struct item *it);
 void item_delete(struct item *it);
 
 void item_remove(struct item *it);
-void item_touch(struct item *it);
 
 struct item *item_get(const char *key, size_t nkey);
 

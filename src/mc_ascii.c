@@ -502,7 +502,6 @@ asc_process_read(struct conn *c, struct token *token, int ntoken)
                 log_debug(LOG_VVERB, ">%d sending key %.*s", c->sd, it->nkey,
                           item_key(it));
 
-                item_touch(it);
                 *(c->ilist + valid_key_iter) = it;
                 valid_key_iter++;
             } else {
