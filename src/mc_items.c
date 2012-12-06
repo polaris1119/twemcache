@@ -45,7 +45,7 @@ item_expired(struct item *it)
 {
     ASSERT(it->magic == ITEM_MAGIC);
 
-    return (it->exptime != 0 && it->exptime > time_now()) ? true : false;
+    return (it->exptime != 0 && it->exptime < time_now()) ? true : false;
 }
 
 void
