@@ -218,8 +218,7 @@ slab_heapinfo_init(void)
         return MC_ERROR;
     }
 
-    base = mmap(NULL, size, PROT_READ | PROT_WRITE,
-                         MAP_SHARED, fd, 0);
+    base = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (base == ((void *) -1)) {
         log_error("mmap alloc %zu bytes for %"PRIu32" slabs failed: %s",
                   size, max_nslab, strerror(errno));
