@@ -35,18 +35,14 @@
 extern struct settings settings;
 extern pthread_mutex_t cache_lock;
 
-struct slab_heapinfo {
-    uint8_t         *base;       /* prealloc base */
-    uint8_t         *curr;       /* prealloc start */
-    uint32_t        nslab;       /* # slab allocated */
-    uint32_t        max_nslab;   /* max # slab allowed */
-    struct slab     **slab_table;/* table of all slabs */
-};
-
+uint8_t *base;                                  /* prealloc base */
+uint8_t *curr;                                  /* prealloc start */
 struct slabclass slabclass[SLABCLASS_MAX_IDS];  /* collection of slabs bucketed by slabclass */
 uint8_t slabclass_max_id;                       /* maximum slabclass id */
-static struct slab_heapinfo heapinfo;           /* info of all allocated slabs */
-pthread_mutex_t slab_lock;                      /* lock protecting slabclass and heapinfo */
+struct slab **slab_table;                       /* table of all slabs in the system */
+uint32_t nslab;                                 /* # slab allocated */
+uint32_t max_nslab;                             /* max # slab allowed */
+pthread_mutex_t slab_lock;                      /* lock protecting slabclass and other globals */
 
 /*
  * Return the usable space for item sized chunks that would be carved out
@@ -211,10 +207,10 @@ slab_heapinfo_init(void)
 {
     size_t size;
 
-    heapinfo.nslab = 0;
-    heapinfo.max_nslab = settings.maxbytes / settings.slab_size;
+    nslab = 0;
+    max_nslab = settings.maxbytes / settings.slab_size;
 
-    size = heapinfo.max_nslab * settings.slab_size;
+    size = max_nslab * settings.slab_size;
 
     int fd = open("/home/manj/ssd.dump", O_RDWR, 0644);
     if (fd < 0) {
@@ -222,31 +218,28 @@ slab_heapinfo_init(void)
         return MC_ERROR;
     }
 
-//    heapinfo.base = mmap(NULL, size, PROT_READ | PROT_WRITE,
-//                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-
-    heapinfo.base = mmap(NULL, size, PROT_READ | PROT_WRITE,
+    base = mmap(NULL, size, PROT_READ | PROT_WRITE,
                          MAP_SHARED, fd, 0);
-    if (heapinfo.base == ((void *) -1)) {
+    if (base == ((void *) -1)) {
         log_error("mmap alloc %zu bytes for %"PRIu32" slabs failed: %s",
-                  size, heapinfo.max_nslab, strerror(errno));
+                  size, max_nslab, strerror(errno));
         return MC_ENOMEM;
     }
 
     log_debug(LOG_INFO, "pre-allocated %zu bytes for %"PRIu32" slabs",
-              size, heapinfo.max_nslab);
+              size, max_nslab);
 
-    heapinfo.curr = heapinfo.base;
+    curr = base;
 
-    heapinfo.slab_table = mc_alloc(sizeof(*heapinfo.slab_table) * heapinfo.max_nslab);
-    if (heapinfo.slab_table == NULL) {
+    slab_table = mc_alloc(sizeof(*slab_table) * max_nslab);
+    if (slab_table == NULL) {
         log_error("create of slab table with %"PRIu32" entries failed: %s",
-                  heapinfo.max_nslab, strerror(errno));
+                  max_nslab, strerror(errno));
         return MC_ENOMEM;
     }
 
     log_debug(LOG_VVERB, "created slab table with %"PRIu32" entries",
-              heapinfo.max_nslab);
+              max_nslab);
 
     return MC_OK;
 }
@@ -257,16 +250,16 @@ slab_heapinfo_deinit(void)
     int status;
     size_t size;
 
-    if (heapinfo.base == NULL) {
+    if (base == NULL) {
         return;
     }
 
-    size = heapinfo.max_nslab * settings.slab_size;
+    size = max_nslab * settings.slab_size;
 
-    status = munmap(heapinfo.base, size);
+    status = munmap(base, size);
     if (status < 0) {
         log_error("munmap %zu bytes at %p addr failed, ignored: %s,", size,
-                  heapinfo.base, strerror(errno));
+                  base, strerror(errno));
     }
 }
 
@@ -306,7 +299,7 @@ slab_hdr_init(struct slab *slab, uint8_t id)
 static bool
 slab_heap_full(void)
 {
-    return (heapinfo.nslab >= heapinfo.max_nslab);
+    return (nslab >= max_nslab) ? true : false;
 }
 
 static struct slab *
@@ -314,8 +307,8 @@ slab_heap_alloc(void)
 {
     struct slab *slab;
 
-    slab = (struct slab *)heapinfo.curr;
-    heapinfo.curr += settings.slab_size;
+    slab = (struct slab *)curr;
+    curr += settings.slab_size;
 
     return slab;
 }
@@ -323,13 +316,13 @@ slab_heap_alloc(void)
 static void
 slab_table_update(struct slab *slab)
 {
-    ASSERT(heapinfo.nslab < heapinfo.max_nslab);
+    ASSERT(nslab < max_nslab);
 
-    heapinfo.slab_table[heapinfo.nslab] = slab;
-    heapinfo.nslab++;
+    slab_table[nslab] = slab;
+    nslab++;
 
     log_debug(LOG_VERB, "new slab %p allocated at pos %u", slab,
-              heapinfo.nslab - 1);
+              nslab - 1);
 }
 
 /*
