@@ -34,41 +34,24 @@
 
 extern struct settings settings;
 
+pthread_mutex_t cache_lock; /* lock protecting hash */
+
 /*
- * We only reposition items in the lru q if they haven't been
- * repositioned in this many seconds. That saves us from churning
- * on frequently-accessed items
+ * Return true if the item has expired, otherwise return false. Items
+ * with expiry of 0 are considered as unexpirable.
  */
-#define ITEM_UPDATE_INTERVAL    60
-
-#define ITEM_LRUQ_MAX_TRIES     50
-
-/* 2MB is the maximum response size for 'cachedump' command */
-#define ITEM_CACHEDUMP_MEMLIMIT (2 * MB)
-
-pthread_mutex_t cache_lock;                     /* lock protecting lru q and hash */
-struct item_tqh item_lruq[SLABCLASS_MAX_IDS];   /* lru q of items */
-
 static bool
 item_expired(struct item *it)
 {
     ASSERT(it->magic == ITEM_MAGIC);
 
-    return (it->exptime > 0 && it->exptime < time_now()) ? true : false;
+    return (it->exptime != 0 && it->exptime > time_now()) ? true : false;
 }
 
 void
 item_init(void)
 {
-    uint8_t i;
-
-    log_debug(LOG_DEBUG, "item hdr size %d", ITEM_HDR_SIZE);
-
     pthread_mutex_init(&cache_lock, NULL);
-
-    for (i = SLABCLASS_MIN_ID; i <= SLABCLASS_MAX_ID; i++) {
-        TAILQ_INIT(&item_lruq[i]);
-    }
 }
 
 void
@@ -82,12 +65,9 @@ item_deinit(void)
 char *
 item_data(struct item *it)
 {
-    char *data;
-
     ASSERT(it->magic == ITEM_MAGIC);
 
-    data = it->end + it->nkey + 1; /* 1 for terminal '\0' in key */
-    return data;
+    return it->end + it->nkey + 1; /* 1 for terminal '\0' in key */
 }
 
 /*
@@ -141,137 +121,8 @@ item_hdr_init(struct item *it, uint32_t offset, uint8_t id)
     it->flags = 0;
 }
 
-/*
- * Add an item to the tail of the lru q.
- *
- * Lru q is sorted in ascending time order - oldest to most recent. So
- * enqueuing at item to the tail of the lru q requires us to update its
- * last access time atime.
- *
- * The allocated flag indicates whether the item being re-linked is a newly
- * allocated or not. This is useful for updating the slab lruq, which can
- * choose to update only when a new item has been allocated (write-only) or
- * the opposite (read-only), or on both occasions (access-based).
- */
-static void
-item_link_q(struct item *it, bool allocated)
-{
-    uint8_t id = it->id;
-
-    ASSERT(id >= SLABCLASS_MIN_ID && id <= SLABCLASS_MAX_ID);
-    ASSERT(it->magic == ITEM_MAGIC);
-    ASSERT(!item_is_slabbed(it));
-
-    log_debug(LOG_VVERB, "link q it '%.*s' at offset %"PRIu32" with flags "
-              "%02x id %"PRId8"", it->nkey, item_key(it), it->offset,
-              it->flags, it->id);
-
-    it->atime = time_now();
-    TAILQ_INSERT_TAIL(&item_lruq[id], it, i_tqe);
-
-    stats_slab_incr(id, item_curr);
-    stats_slab_incr_by(id, data_curr, item_size(it));
-    stats_slab_incr_by(id, data_value_curr, it->nbyte);
-}
-
-/*
- * Remove the item from the lru q
- */
-static void
-item_unlink_q(struct item *it)
-{
-    uint8_t id = it->id;
-
-    ASSERT(id >= SLABCLASS_MIN_ID && id <= SLABCLASS_MAX_ID);
-    ASSERT(it->magic == ITEM_MAGIC);
-
-    log_debug(LOG_VVERB, "unlink q it '%.*s' at offset %"PRIu32" with flags "
-              "%02x id %"PRId8"", it->nkey, item_key(it), it->offset,
-              it->flags, it->id);
-
-    TAILQ_REMOVE(&item_lruq[id], it, i_tqe);
-
-    stats_slab_decr(id, item_curr);
-    stats_slab_decr_by(id, data_curr, item_size(it));
-    stats_slab_decr_by(id, data_value_curr, it->nbyte);
-}
-
-/*
- * Make an item with zero refcount available for reuse by unlinking
- * it from the lru q and hash.
- *
- * Don't free the item yet because that would make it unavailable
- * for reuse.
- */
-void
-item_reuse(struct item *it)
-{
-    ASSERT(pthread_mutex_trylock(&cache_lock) != 0);
-    ASSERT(it->magic == ITEM_MAGIC);
-    ASSERT(!item_is_slabbed(it));
-    ASSERT(item_is_linked(it));
-    ASSERT(it->refcount == 0);
-
-    it->flags &= ~ITEM_LINKED;
-
-    assoc_delete(item_key(it), it->nkey);
-    item_unlink_q(it);
-
-    stats_slab_incr(it->id, item_remove);
-    stats_slab_settime(it->id, item_reclaim_ts, time_now());
-
-    log_debug(LOG_VERB, "reuse %s it '%.*s' at offset %"PRIu32" with id "
-              "%"PRIu8"", item_expired(it) ? "expired" : "evicted",
-              it->nkey, item_key(it), it->offset, it->id);
-}
-
-/*
- * Find an unused (unreferenced) item from lru q.
- *
- * First try to find an expired item from the lru Q of item's slab
- * class; if all items are unexpired, return the one that is the
- * least recently used.
- *
- * We bound the search for an expired item in lru q, by only
- * traversing the oldest ITEM_LRUQ_MAX_TRIES items.
- */
-static struct item *
-item_get_from_lruq(uint8_t id)
-{
-    struct item *it;  /* expired item */
-    struct item *uit; /* unexpired item */
-    uint32_t tries;
-
-    if (!settings.use_lruq) {
-        return NULL;
-    }
-
-    for (tries = ITEM_LRUQ_MAX_TRIES, it = TAILQ_FIRST(&item_lruq[id]),
-         uit = NULL;
-         it != NULL && tries > 0;
-         tries--, it = TAILQ_NEXT(it, i_tqe)) {
-
-        if (it->refcount != 0) {
-            log_debug(LOG_VVERB, "skip it '%.*s' at offset %"PRIu32" with "
-                      "flags %02x id %"PRId8" refcount %"PRIu16"", it->nkey,
-                      item_key(it), it->offset, it->flags, it->id,
-                      it->refcount);
-            continue;
-        }
-
-        if (item_expired(it)) {
-            /* first expired item wins */
-            return it;
-        } else if (uit == NULL) {
-            /* otherwise, get the lru unexpired item */
-            uit = it;
-        }
-    }
-
-    return uit;
-}
-
-uint8_t item_slabid(uint8_t nkey, uint32_t nbyte)
+uint8_t
+item_slabid(uint8_t nkey, uint32_t nbyte)
 {
     size_t ntotal;
     uint8_t id;
@@ -289,67 +140,27 @@ uint8_t item_slabid(uint8_t nkey, uint32_t nbyte)
 }
 
 /*
- * Allocate an item. We allocate an item either by -
- *  1. Reusing an expired item from the lru Q of an item's slab class. Or,
- *  2. Consuming the next free item from slab of the item's an slab class
+ * Allocate an item. We allocate an item by consuming the next free item
+ * from slab of the item's an slab class.
  *
  * On success we return the pointer to the allocated item. The returned item
  * is refcounted so that it is not deleted under callers nose. It is the
  * callers responsibilty to release this refcount when the item is inserted
- * into the hash + lru q or freed.
+ * into the hash or freed.
  */
 static struct item *
-_item_alloc(uint8_t id, char *key, uint8_t nkey, uint32_t dataflags, rel_time_t
-            exptime, uint32_t nbyte)
+_item_alloc(uint8_t id, char *key, uint8_t nkey, uint32_t dataflags,
+            rel_time_t exptime, uint32_t nbyte)
 {
-    struct item *it;  /* item */
-    struct item *uit; /* unexpired lru item */
+    struct item *it;
 
     ASSERT(id >= SLABCLASS_MIN_ID && id <= SLABCLASS_MAX_ID);
 
-    /*
-     * We try to obtain an item in the following order:
-     *  1)  by acquiring an expired item;
-     *  2)  by getting a free slot from the last slab in current class;
-     *  3)  by evicting a slab, if slab eviction(s) are enabled;
-     *  4)  by evicting an item, if item lru eviction is enabled.
-     */
-    it = item_get_from_lruq(id); /* expired / unexpired lru item */
-
-    if (it != NULL && item_expired(it)) {
-        /* 1) this is an expired item, always use it */
-        stats_slab_incr(id, item_expire);
-        stats_slab_settime(id, item_expire_ts, it->exptime);
-
-        item_reuse(it);
-        goto done;
-    }
-
-    uit = (settings.evict_opt & EVICT_LRU)? it : NULL; /* keep if can be used */
-
     it = slab_get_item(id);
-    if (it != NULL) {
-        /* 2) or 3a) either we allow random eviction a free item is found */
-        goto done;
+    if (it == NULL) {
+        log_warn("server error on allocating item in slab %"PRIu8, id);
+        return NULL;
     }
-
-    if (uit != NULL) {
-        /* 3b) this is an lru item and we can reuse it */
-        it = uit;
-        stats_slab_incr(id, item_evict);
-        stats_slab_settime(id, item_evict_ts, time_now());
-
-        item_reuse(it);
-        goto done;
-    }
-
-    log_warn("server error on allocating item in slab %"PRIu8, id);
-
-    stats_thread_incr(server_error);
-
-    return NULL;
-
-done:
 
     ASSERT(it->id == id);
     ASSERT(!item_is_linked(it));
@@ -412,7 +223,6 @@ _item_link(struct item *it)
     it->flags |= ITEM_LINKED;
 
     assoc_insert(it);
-    item_link_q(it, true);
 }
 
 /*
@@ -433,8 +243,6 @@ _item_unlink(struct item *it)
         it->flags &= ~ITEM_LINKED;
 
         assoc_delete(item_key(it), it->nkey);
-
-        item_unlink_q(it);
 
         if (it->refcount == 0) {
             item_free(it);
@@ -523,7 +331,7 @@ _item_get(const char *key, size_t nkey)
         return NULL;
     }
 
-    if (it->exptime != 0 && it->exptime <= time_now()) {
+    if (item_expired(it)) {
         _item_unlink(it);
         stats_slab_incr(it->id, item_expire);
         stats_slab_settime(it->id, item_reclaim_ts, time_now());
@@ -546,7 +354,6 @@ _item_get(const char *key, size_t nkey)
     log_debug(LOG_VERB, "get it '%.*s' found at offset %"PRIu32" with flags "
               "%02x id %"PRIu8" refcount %"PRIu32"", it->nkey, item_key(it),
               it->offset, it->flags, it->id);
-
 
     return it;
 }
