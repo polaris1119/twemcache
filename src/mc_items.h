@@ -31,7 +31,7 @@
 #define _MC_ITEMS_H_
 
 typedef enum item_flags {
-    ITEM_LINKED  = 1,  /* item in lru q and hash */
+    ITEM_LINKED  = 1,  /* item in hash */
     ITEM_SLABBED = 2,  /* item in free q */
 } item_flags_t;
 
@@ -75,9 +75,7 @@ typedef enum item_store_result {
  */
 struct item {
     uint32_t          magic;      /* item magic (const) */
-    TAILQ_ENTRY(item) i_tqe;      /* link in lru q or free q */
     SLIST_ENTRY(item) h_sle;      /* link in hash */
-    rel_time_t        atime;      /* last access time in secs */
     rel_time_t        exptime;    /* expiry time in secs */
     uint32_t          nbyte;      /* date size */
     uint32_t          offset;     /* offset of item in slab */
@@ -101,33 +99,31 @@ TAILQ_HEAD(item_tqh, item);
  * for an item. An item chunk contains the item header followed by item
  * data.
  *
- * The smallest item data is actually a single byte key with a zero byte value
- * which internally is of sizeof("k"), as key is stored with terminating '\0'.
+ * The smallest item data is actually a single byte key with a zero byte
+ * value which internally is of sizeof("k"), as key is stored with
+ * terminating '\0'.
  *
  * The largest item data is actually the room left in the slab_size()
  * slab, after the item header has been factored out
  */
-#define ITEM_MIN_PAYLOAD_SIZE  (sizeof("k") + sizeof(uint64_t))
-#define ITEM_MIN_CHUNK_SIZE \
+#define ITEM_MIN_PAYLOAD_SIZE   (sizeof("k") + sizeof(uint64_t))
+#define ITEM_MIN_CHUNK_SIZE     \
     MC_ALIGN(ITEM_HDR_SIZE + ITEM_MIN_PAYLOAD_SIZE, MC_ALIGNMENT)
 
-#define ITEM_PAYLOAD_SIZE      32
-#define ITEM_CHUNK_SIZE     \
+#define ITEM_PAYLOAD_SIZE       32
+#define ITEM_CHUNK_SIZE         \
     MC_ALIGN(ITEM_HDR_SIZE + ITEM_PAYLOAD_SIZE, MC_ALIGNMENT)
 
-
-#if __GNUC__ >= 4 && __GNUC_MINOR__ >= 2
-#pragma GCC diagnostic ignored "-Wstrict-aliasing"
-#endif
-
 static inline bool
-item_is_linked(struct item *it) {
-    return (it->flags & ITEM_LINKED);
+item_is_linked(struct item *it)
+{
+    return (it->flags & ITEM_LINKED) ? true : false;
 }
 
 static inline bool
-item_is_slabbed(struct item *it) {
-    return (it->flags & ITEM_SLABBED);
+item_is_slabbed(struct item *it)
+{
+    return (it->flags & ITEM_SLABBED) ? true : false;
 }
 
 static inline char *
@@ -141,17 +137,12 @@ item_key(struct item *it)
 static inline size_t
 item_ntotal(uint8_t nkey, uint32_t nbyte)
 {
-    size_t ntotal;
-
-    ntotal = ITEM_HDR_SIZE + nkey + 1 + nbyte;
-
-    return ntotal;
+    return ITEM_HDR_SIZE + nkey + 1 + nbyte;
 }
 
 static inline size_t
 item_size(struct item *it)
 {
-
     ASSERT(it->magic == ITEM_MAGIC);
 
     return item_ntotal(it->nkey, it->nbyte);
@@ -159,21 +150,14 @@ item_size(struct item *it)
 
 void item_init(void);
 void item_deinit(void);
-
-char * item_data(struct item *it);
+char *item_data(struct item *it);
 struct slab *item_2_slab(struct item *it);
-
 void item_hdr_init(struct item *it, uint32_t offset, uint8_t id);
-
 uint8_t item_slabid(uint8_t nkey, uint32_t nbyte);
 struct item *item_alloc(uint8_t id, char *key, size_t nkey, uint32_t dataflags, rel_time_t exptime, uint32_t nbyte);
-
 void item_delete(struct item *it);
-
 void item_remove(struct item *it);
-
 struct item *item_get(const char *key, size_t nkey);
-
 item_store_result_t item_store(struct item *it, req_type_t type, struct conn *c);
 
 #endif

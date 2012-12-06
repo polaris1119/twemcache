@@ -589,12 +589,10 @@ stats_settings(void *c)
     stats_print(c, "daemonize", "%u", (unsigned int)settings.daemonize);
     stats_print(c, "num_workers", "%d", settings.num_workers);
     stats_print(c, "reqs_per_event", "%d", settings.reqs_per_event);
-    stats_print(c, "oldest", "%u", settings.oldest_live);
     stats_print(c, "log_filename", "%s", settings.log_filename);
     stats_print(c, "verbosity", "%d", settings.verbose);
-    stats_print(c, "tcpport", "%d", settings.port);
+    stats_print(c, "port", "%d", settings.port);
     stats_print(c, "tcp_backlog", "%d", settings.backlog);
-    stats_print(c, "evictions", "%d", settings.evict_opt);
     stats_print(c, "growth_factor", "%.2f", settings.factor);
     stats_print(c, "maxbytes", "%zu", settings.maxbytes);
     stats_print(c, "chunk_size", "%d", settings.chunk_size);

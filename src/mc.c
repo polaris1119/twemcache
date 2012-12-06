@@ -75,16 +75,13 @@
 #define MC_HASH_MAX_POWER   HASH_MAX_POWER
 
 #define MC_WORKERS          4
-#define MC_PID_FILE         NULL
 
 #define MC_REQ_PER_EVENT    20
 #define MC_MAX_CONNS        1024
 #define MC_BACKLOG          1024
 
-#define MC_TCP_PORT         11211
+#define MC_PORT             11211
 
-#define MC_EVICT            EVICT_RS
-#define MC_EVICT_STR        "random"
 #define MC_FACTOR           1.25
 #define MC_MAXBYTES         (64 * MB)
 
@@ -109,7 +106,6 @@ static struct option long_options[] = {
     { "max-requests",         required_argument,  NULL,   'R' }, /* max request per event */
     { "backlog",              required_argument,  NULL,   'b' }, /* tcp backlog queue limit */
     { "port",                 required_argument,  NULL,   'p' }, /* tcp port number to listen on */
-    { "eviction-strategy",    required_argument,  NULL,   'M' }, /* eviction strategy on OOM */
     { "factor",               required_argument,  NULL,   'f' }, /* growth factor for slab items */
     { "max-memory",           required_argument,  NULL,   'm' }, /* max memory for all items in MB */
     { "min-item-chunk-size",  required_argument,  NULL,   'n' }, /* min item chunk size */
@@ -131,7 +127,6 @@ static char short_options[] =
     "R:" /* max request per event */
     "b:" /* tcp backlog queue limit */
     "p:" /* tcp port number to listen on */
-    "M:" /* eviction strategy on OOM */
     "f:" /* growth factor for slab items */
     "m:" /* max memory for all items in MB */
     "n:" /* min item size */
@@ -158,7 +153,6 @@ mc_show_usage(void)
         "  -D, --describe-stats        : print stats description and exit" CRLF
         "  -S, --show-sizes            : print slab and item struct sizes and exit"
         " ");
-
     log_stderr(
         "  -o, --output=S              : set the logging file (default: %s)" CRLF
         "  -v, --verbosity=N           : set the logging level (default: %d, min: %d, max: %d)" CRLF
@@ -168,31 +162,25 @@ mc_show_usage(void)
         " ",
         MC_LOG_FILE != NULL ? MC_LOG_FILE : "stderr", MC_LOG_DEFAULT, MC_LOG_MIN, MC_LOG_MAX,
         MC_STATS_INTVL,
-        MC_WORKERS
-        );
-
+        MC_WORKERS);
     log_stderr(
         "  -R, --max-requests=N        : set the maximum number of requests per event (default: %d)" CRLF
         "  -b, --backlog=N             : set the backlog queue limit (default %d)" CRLF
-        "  -p, --port=N                : set the tcp port to listen on (default: %d)"
+        "  -p, --port=N                : set the port to listen on (default: %d)"
         " ",
-        MC_REQ_PER_EVENT, MC_BACKLOG,
-        MC_TCP_PORT
-        );
-
+        MC_REQ_PER_EVENT,
+        MC_BACKLOG,
+        MC_PORT);
     log_stderr(
-        "  -M, --eviction-strategy=N   : set the eviction strategy on OOM (default: %d, %s)" CRLF
         "  -f, --factor=D              : set the growth factor of slab item sizes (default: %g)" CRLF
         "  -m, --max-memory=N          : set the maximum memory to use for all items in MB (default: %d MB)" CRLF
         "  -n, --min-item-chunk-size=N : set the minimum item chunk size in bytes (default: %d bytes)" CRLF
         "  -I, --slab-size=N           : set slab size in bytes (default: %d bytes)" CRLF
         "  -z, --slab-profile=S        : set the profile of slab item chunk sizes (default: off)" CRLF
         " ",
-        MC_EVICT, MC_EVICT_STR,
         MC_FACTOR, MC_MAXBYTES / MB,
         MC_CHUNK_SIZE,
-        SLAB_SIZE
-        );
+        SLAB_SIZE);
 }
 
 static rstatus_t
@@ -310,10 +298,8 @@ mc_set_default_options(void)
     settings.reqs_per_event = MC_REQ_PER_EVENT;
     settings.maxconns = MC_MAX_CONNS;
     settings.backlog = MC_BACKLOG;
-    settings.port = MC_TCP_PORT;
+    settings.port = MC_PORT;
 
-    settings.evict_opt = MC_EVICT;
-    settings.use_lruq = true;
     settings.factor = MC_FACTOR;
     settings.maxbytes = MC_MAXBYTES;
     settings.chunk_size = MC_CHUNK_SIZE;
@@ -321,7 +307,6 @@ mc_set_default_options(void)
     settings.hash_power = 0;
 
     settings.accepting_conns = true;
-    settings.oldest_live = 0;
 
     memset(settings.profile, 0, sizeof(settings.profile));
     settings.profile_last_id = SLABCLASS_MAX_ID;
@@ -464,23 +449,6 @@ mc_get_options(int argc, char **argv)
             settings.port = value;
             break;
 
-        case 'M':
-            value = mc_atoi(optarg, strlen(optarg));
-            if (value < 0) {
-                log_stderr("twemcache: option -M requires a number");
-                return MC_ERROR;
-            }
-            if (value >= EVICT_INVALID || value < EVICT_NONE) {
-                log_stderr("twemcache: option -M value %d is not a valid "
-                           "eviction strategy", value);
-                return MC_ERROR;
-            }
-            settings.evict_opt = value;
-            if (value == EVICT_CS) {
-                settings.use_lruq = false;
-            }
-            break;
-
         case 'f':
             settings.factor = atof(optarg);
             if (settings.factor <= 1.0) {
@@ -587,7 +555,6 @@ mc_get_options(int argc, char **argv)
             case 'b':
             case 'p':
             case 'a':
-            case 'M':
             case 'f':
             case 'm':
             case 'n':

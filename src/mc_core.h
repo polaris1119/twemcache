@@ -210,8 +210,6 @@ struct settings {
     int             backlog;                      /* network : tcp backlog */
     int             port;                         /* network : tcp listening port */
 
-    int             evict_opt;                    /* memory  : eviction */
-    bool            use_lruq;                     /* memory  : whether use items in freeq or not */
     double          factor;                       /* memory  : chunk size growth factor */
     size_t          maxbytes;                     /* memory  : maximum bytes allowed for slabs */
     size_t          chunk_size;                   /* memory  : minimum item chunk size */
@@ -222,7 +220,6 @@ struct settings {
                                                   /* global state */
 
     bool            accepting_conns;              /* network : whether we accept new connections */
-    rel_time_t      oldest_live;                  /* data    : ignore existing items older than this */
 
     size_t          profile[SLABCLASS_MAX_IDS];   /* memory  : slab profile */
     uint8_t         profile_last_id;              /* memory  : last id in slab profile */
