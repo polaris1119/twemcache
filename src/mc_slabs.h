@@ -58,7 +58,7 @@ struct slab {
     uint8_t           id;       /* slabclass id */
     uint8_t           unused;   /* unused */
     uint16_t          refcount; /* # concurrent users */
-    TAILQ_ENTRY(slab) s_tqe;    /* link in slab lruq */
+    TAILQ_ENTRY(slab) s_tqe;    /* link in slab q */
     rel_time_t        utime;    /* last update time in secs */
     uint32_t          padding;  /* unused */
     uint8_t           data[1];  /* opaque data */
@@ -78,11 +78,10 @@ TAILQ_HEAD(slab_tqh, slab);
  * unique unsigned 8-bit id, which also identifies its owner slabclass
  *
  * Slabs that belong to a given class are reachable through slabq. Slabs
- * across all classes are reachable through the slabtable and slab lruq.
+ * across all classes are reachable through the slabtable.
  *
  * We use free_item as a marker for the next available, unallocated item
- * in the current slab. Items that are available for reuse (i.e. allocated
- * and then freed) are kept track by free_itemq
+ * in the current slab.
  *
  * slabclass[]:
  *
@@ -101,8 +100,8 @@ TAILQ_HEAD(slab_tqh, slab);
  *  |             |     |               |                   |    |               |                   |
  *  |   class 1   |     |  slab header  |     slab data     |    |  slab header  |     slab data     |
  *  |             |     |               |                   |    |               |                   |--+
- *  |             |\    +---------------+-------------------+    +---------------+-------------------+  |
- *  |             | \                                                                                   //
+ *  |             |     +---------------+-------------------+    +---------------+-------------------+  |
+ *  |             |                                                                                   //
  *  |             |
  *  +-------------+
  *  |             |  -----------------+
@@ -111,8 +110,8 @@ TAILQ_HEAD(slab_tqh, slab);
  *  |             |     |               |                   |
  *  |   class 2   |     |  slab header  |     slab data     |
  *  |             |     |               |                   |--+
- *  |             |\    +---------------+-------------------+  |
- *  |             | \                                          //
+ *  |             |     +---------------+-------------------+  |
+ *  |             |                                           //
  *  |             |
  *  +-------------+
  *  |             |
@@ -159,6 +158,5 @@ void slab_deinit(void);
 
 struct item *slab_get_item(uint8_t id);
 void slab_put_item(struct item *it);
-void slab_lruq_touch(struct slab *slab, bool allocated);
 
 #endif

@@ -169,8 +169,6 @@ item_link_q(struct item *it, bool allocated)
     it->atime = time_now();
     TAILQ_INSERT_TAIL(&item_lruq[id], it, i_tqe);
 
-    slab_lruq_touch(item_2_slab(it), allocated);
-
     stats_slab_incr(id, item_curr);
     stats_slab_incr_by(id, data_curr, item_size(it));
     stats_slab_incr_by(id, data_value_curr, it->nbyte);

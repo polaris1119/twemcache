@@ -41,17 +41,12 @@ struct slab_heapinfo {
     uint32_t        nslab;       /* # slab allocated */
     uint32_t        max_nslab;   /* max # slab allowed */
     struct slab     **slab_table;/* table of all slabs */
-    struct slab_tqh slab_lruq;   /* lru slab q */
 };
 
 struct slabclass slabclass[SLABCLASS_MAX_IDS];  /* collection of slabs bucketed by slabclass */
 uint8_t slabclass_max_id;                       /* maximum slabclass id */
 static struct slab_heapinfo heapinfo;           /* info of all allocated slabs */
 pthread_mutex_t slab_lock;                      /* lock protecting slabclass and heapinfo */
-
-#define SLAB_RAND_MAX_TRIES         50
-#define SLAB_LRU_MAX_TRIES          50
-#define SLAB_LRU_UPDATE_INTERVAL    1
 
 /*
  * Return the usable space for item sized chunks that would be carved out
@@ -121,7 +116,8 @@ slab_2_item(struct slab *slab, uint32_t idx, size_t size)
  * Return the item size given a slab id
  */
 size_t
-slab_item_size(uint8_t id) {
+slab_item_size(uint8_t id)
+{
     ASSERT(id >= SLABCLASS_MIN_ID && id <= slabclass_max_id);
 
     return slabclass[id].size;
@@ -220,9 +216,9 @@ slab_heapinfo_init(void)
 
     size = heapinfo.max_nslab * settings.slab_size;
 
-    int fd = open("/dev/sdb", O_RDWR, 0644);
+    int fd = open("/home/manj/ssd.dump", O_RDWR, 0644);
     if (fd < 0) {
-        log_error("open /dev/sdb failed: %s", strerror(errno));
+        log_error("open /home/manj/ssd.dump failed: %s", strerror(errno));
         return MC_ERROR;
     }
 
@@ -248,7 +244,6 @@ slab_heapinfo_init(void)
                   heapinfo.max_nslab, strerror(errno));
         return MC_ENOMEM;
     }
-    TAILQ_INIT(&heapinfo.slab_lruq);
 
     log_debug(LOG_VVERB, "created slab table with %"PRIu32" entries",
               heapinfo.max_nslab);
@@ -337,35 +332,6 @@ slab_table_update(struct slab *slab)
               heapinfo.nslab - 1);
 }
 
-static struct slab *
-slab_table_rand(void)
-{
-    uint32_t rand_idx;
-
-    rand_idx = (uint32_t)rand() % heapinfo.nslab;
-    return heapinfo.slab_table[rand_idx];
-}
-
-static struct slab *
-slab_lruq_head()
-{
-    return TAILQ_FIRST(&heapinfo.slab_lruq);
-}
-
-static void
-slab_lruq_append(struct slab *slab)
-{
-    log_debug(LOG_VVERB, "append slab %p with id %d from lruq", slab, slab->id);
-    TAILQ_INSERT_TAIL(&heapinfo.slab_lruq, slab, s_tqe);
-}
-
-static void
-slab_lruq_remove(struct slab *slab)
-{
-    log_debug(LOG_VVERB, "remove slab %p with id %d from lruq", slab, slab->id);
-    TAILQ_REMOVE(&heapinfo.slab_lruq, slab, s_tqe);
-}
-
 /*
  * Get a raw slab from the slab pool.
  */
@@ -388,132 +354,6 @@ slab_get_new(void)
     return slab;
 }
 
-/*
- * Primitives handling slab lruq activities
- */
-static void
-_slab_link_lruq(struct slab *slab)
-{
-    slab->utime = time_now();
-    slab_lruq_append(slab);
-}
-
-static void
-_slab_unlink_lruq(struct slab *slab)
-{
-    slab_lruq_remove(slab);
-}
-
-/*
- * Evict a slab by evicting all the items within it. This means that the
- * items that are carved out of the slab must either be deleted from their
- * a) hash + lru Q, or b) free Q. The candidate slab itself must also be
- * delinked from its respective slab pool so that it is available for reuse.
- *
- * Eviction complexity is O(#items/slab).
- */
- static void
-slab_evict_one(struct slab *slab)
-{
-    struct slabclass *p;
-    struct item *it;
-    uint32_t i;
-
-    p = &slabclass[slab->id];
-
-    /* candidate slab is also the current slab */
-    if (p->free_item != NULL && slab == item_2_slab(p->free_item)) {
-        p->nfree_item = 0;
-        p->free_item = NULL;
-    }
-
-    /* delete slab items either from hash + lru Q */
-    for (i = 0; i < p->nitem; i++) {
-        it = slab_2_item(slab, i, p->size);
-
-        ASSERT(it->magic == ITEM_MAGIC);
-        ASSERT(it->refcount == 0);
-        ASSERT(it->offset != 0);
-
-        if (item_is_linked(it)) {
-            item_reuse(it);
-        } else if (item_is_slabbed(it)) {
-            ASSERT(slab == item_2_slab(it));
-
-            it->flags &= ~ITEM_SLABBED;
-
-            stats_slab_decr(slab->id, item_free);
-        }
-    }
-
-    /* unlink the slab from its class */
-    slab_lruq_remove(slab);
-
-    stats_slab_incr(slab->id, slab_evict);
-    stats_slab_decr(slab->id, slab_curr);
-    stats_slab_settime(slab->id, slab_evict_ts, time_now());
-}
-
-/*
- * Get a random slab from all active slabs and evict it for new allocation.
- *
- * Note that the slab_table enables us to have O(1) lookup for every slab in
- * the system. The inserts into the table are just appends - O(1) and there
- * are no deletes from the slab_table. These two constraints allows us to keep
- * our random choice uniform.
- */
-static struct slab *
-slab_evict_rand(void)
-{
-    struct slab *slab;
-    uint32_t tries;
-
-    tries = SLAB_RAND_MAX_TRIES;
-    do {
-        slab = slab_table_rand();
-        tries--;
-    } while (tries > 0 && slab->refcount != 0);
-
-    if (tries == 0) {
-        /* all randomly chosen slabs are in use */
-        return NULL;
-    }
-
-    log_debug(LOG_DEBUG, "random-evicting slab %p with id %u", slab, slab->id);
-
-    slab_evict_one(slab);
-
-    return slab;
-}
-
-/*
- * Evict by looking into least recently used queue of all slabs.
- */
-static struct slab *
-slab_evict_lru(int id)
-{
-    struct slab *slab;
-    uint32_t tries;
-
-
-    for (tries = SLAB_LRU_MAX_TRIES, slab = slab_lruq_head();
-         tries > 0 && slab != NULL;
-         tries--, slab = TAILQ_NEXT(slab, s_tqe)) {
-        if (slab->refcount == 0) {
-            break;
-        }
-    }
-
-    if (tries == 0 || slab == NULL) {
-        return NULL;
-    }
-
-    log_debug(LOG_DEBUG, "lru-evicting slab %p with id %u", slab, slab->id);
-
-    slab_evict_one(slab);
-
-    return slab;
-}
 
 /*
  * All the prep work before start using a slab.
@@ -525,8 +365,6 @@ slab_add_one(struct slab *slab, uint8_t id)
     struct item *it;
     uint32_t i, offset;
 
-	//msync(heapinfo.base,heapinfo.max_nslab * settings.slab_size, 0);
-
     p = &slabclass[id];
 
     stats_slab_incr(id, slab_alloc);
@@ -535,8 +373,6 @@ slab_add_one(struct slab *slab, uint8_t id)
 
     /* initialize slab header */
     slab_hdr_init(slab, id);
-
-    slab_lruq_append(slab);
 
     /* initialize all slab items */
     for (i = 0; i < p->nitem; i++) {
@@ -551,17 +387,11 @@ slab_add_one(struct slab *slab, uint8_t id)
 }
 
 /*
- * Get a slab.
- *   id is the slabclass the new slab will be linked into.
- *
- * We return a slab either from the:
- * 1. slab pool, if not empty. or,
- * 2. evict an active slab and return that instead.
+ * Get a slab from the slab pool, if not empy.
  */
 static rstatus_t
 slab_get(uint8_t id)
 {
-    rstatus_t status;
     struct slab *slab;
 
     stats_slab_incr(id, slab_req);
@@ -570,28 +400,20 @@ slab_get(uint8_t id)
     ASSERT(slabclass[id].free_item == NULL);
 
     slab = slab_get_new();
-
-    if (slab == NULL && (settings.evict_opt & (EVICT_CS | EVICT_AS))) {
-        slab = slab_evict_lru(id);
-    }
-
-    if (slab == NULL && (settings.evict_opt & EVICT_RS)) {
-        slab = slab_evict_rand();
-    }
-
-    if (slab != NULL) {
-        stats_slab_settime(id, slab_new_ts, time_now());
-
-        slab_add_one(slab, id);
-        status = MC_OK;
-    } else {
+    if (slab == NULL) {
         stats_slab_incr(id, slab_error);
         stats_slab_settime(id, slab_error_ts, time_now());
-
-        status = MC_ENOMEM;
+        return MC_ENOMEM;
     }
 
-    return status;
+    stats_slab_settime(id, slab_new_ts, time_now());
+    /*
+     * Link the new slab into the slabclass identified
+     * by the given id
+     */
+    slab_add_one(slab, id);
+
+    return MC_OK;
 }
 
 /*
@@ -650,47 +472,7 @@ slab_get_item(uint8_t id)
 /*
  * Put an item back into the slab
  */
-static void
-_slab_put_item(struct item *it)
-{
-}
-
 void
 slab_put_item(struct item *it)
 {
-    pthread_mutex_lock(&slab_lock);
-    _slab_put_item(it);
-    pthread_mutex_unlock(&slab_lock);
-}
-
-/*
- * Touch slab lruq by moving the given slab to the tail of the slab lruq, but
- * only if it hasn't been moved within the last SLAB_LRU_UPDATE_INTERVAL secs.
- */
-void
-slab_lruq_touch(struct slab *slab, bool allocated)
-{
-    /*
-     * Check eviction option to make sure we adjust the order of slabs only if:
-     * - request comes from allocating an item & lru slab eviction is specified, or
-     * - lra slab eviction is specified
-     */
-    if (!(allocated && (settings.evict_opt & EVICT_CS)) &&
-        !(settings.evict_opt & EVICT_AS)) {
-        return;
-    }
-
-
-    /* TODO: find out if we can remove this check w/o impacting performance */
-    if (slab->utime >= (time_now() - SLAB_LRU_UPDATE_INTERVAL)) {
-        return;
-    }
-
-    log_debug(LOG_VERB, "update slab %p with id%"PRIu8" in the slab lruq",
-              slab, slab->id);
-
-    pthread_mutex_lock(&slab_lock);
-    _slab_unlink_lruq(slab);
-    _slab_link_lruq(slab);
-    pthread_mutex_unlock(&slab_lock);
 }
