@@ -1,13 +1,17 @@
-## why ssd?
+## Idea
 
-+ ssd is typically used to accelerate storage, but in some cases ssd can replace storage system altogether
-+ memcached + ssd = hybrid memory
++ ssd as an extension of memory.
++ ssd as an extension of disk.
++ The former makes memory fat, latter makes disk fast.
++ The former makes memory slow, latter makes disk expensive.
++ The former doesn't care about persistence, latter does.
++ The former makes sense when accessed over network, latter always makes sense when costs are not prohibitive.
 
 ## mmap, munmap
 
 + http://www.gnu.org/software/libc/manual/html_node/Memory_002dmapped-I_002fO.html
 
-## websites
+## References
 
 + http://www.ramsan.com/
 + http://www.theregister.co.uk/2009/04/13/schooner_memcached_mysql/
@@ -17,9 +21,11 @@
 
 + sudo dd if=/dev/sdb of=./loop_file_10MB bs=1024 count=10K
 
-## performance
+## Performance
 
-### main memory
+### mmap tests
+
+#### main memory
 
     $ ./mcperf -s localhost --num-conns=100 --conn-rate=10000 --num-calls=10000 --call-rate=10000
 
@@ -47,7 +53,7 @@
     CPU time [s]: user 2.27 system 6.17 (user 26.5% system 72.1% total 98.6%)
     Net I/O: bytes 34.3 MB rate 4110.6 KB/s (33.7*10^6 bps)
 
-### ssd (251G APPLE SSD SM256C Media)
+#### ssd (251G APPLE SSD SM256C Media)
 
     $ ./mcperf -s localhost --num-conns=100 --conn-rate=10000 --num-calls=10000 --call-rate=10000
 

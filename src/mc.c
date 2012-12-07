@@ -74,7 +74,7 @@
 
 #define MC_HASH_MAX_POWER   HASH_MAX_POWER
 
-#define MC_WORKERS          4
+#define MC_WORKERS          1
 
 #define MC_REQ_PER_EVENT    20
 #define MC_MAX_CONNS        1024
@@ -158,7 +158,6 @@ mc_show_usage(void)
         "  -v, --verbosity=N           : set the logging level (default: %d, min: %d, max: %d)" CRLF
         "  -A, --stats-aggr-interval=N : set the stats aggregation interval in usec (default: %d usec)" CRLF
         "  -e, --hash-power=N          : set the hash table size as a power of 2 (default: 0, adjustable)" CRLF
-        "  -t, --threads=N             : set number of threads to use (default: %d)"
         " ",
         MC_LOG_FILE != NULL ? MC_LOG_FILE : "stderr", MC_LOG_DEFAULT, MC_LOG_MIN, MC_LOG_MAX,
         MC_STATS_INTVL,

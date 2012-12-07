@@ -32,6 +32,10 @@
 
 #include <mc_items.h>
 
+struct slabaddr {
+    uint32_t offset;    /* offset of slab */
+};
+
 /*
  * Every slab (struct slab) in the twemcache starts with a slab header
  * followed by slab data. The slab data is essentially a collection of

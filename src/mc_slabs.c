@@ -35,14 +35,14 @@
 extern struct settings settings;
 extern pthread_mutex_t cache_lock;
 
-uint8_t *base;                                  /* prealloc base */
-uint8_t *curr;                                  /* prealloc start */
-struct slabclass slabclass[SLABCLASS_MAX_IDS];  /* collection of slabs bucketed by slabclass */
-uint8_t slabclass_max_id;                       /* maximum slabclass id */
-struct slab **slab_table;                       /* table of all slabs in the system */
-uint32_t nslab;                                 /* # slab allocated */
-uint32_t max_nslab;                             /* max # slab allowed */
-pthread_mutex_t slab_lock;                      /* lock protecting slabclass and other globals */
+struct slabclass slabclass[SLABCLASS_MAX_IDS]; /* collection of slabs bucketed by slabclass */
+uint8_t slabclass_max_id;                      /* maximum slabclass id */
+static struct slabaddr *slabtable;             /* table of all slabs in the system */
+static uint32_t nslab;                         /* # slab allocated */
+static uint32_t max_nslab;                     /* max # slab allowed */
+pthread_mutex_t slab_lock;                     /* lock protecting slabclass and other globals */
+
+static void slab_add_one(struct slab *slab, uint8_t id);
 
 /*
  * Return the usable space for item sized chunks that would be carved out
@@ -189,99 +189,73 @@ slab_slabclass_init(void)
     }
 }
 
-static void
-slab_slabclass_deinit(void)
-{
-}
-
-/*
- * Initialize slab heap related info
- *
- * When prelloc is true, the slab allocator allocates the entire heap
- * upfront. Otherwise, memory for new slabsare allocated on demand. But once
- * a slab is allocated, it is never freed, though a slab could be
- * reused on eviction.
- */
-static rstatus_t
-slab_heapinfo_init(void)
-{
-    size_t size;
-
-    nslab = 0;
-    max_nslab = settings.maxbytes / settings.slab_size;
-
-    size = max_nslab * settings.slab_size;
-
-    int fd = open("/home/manj/ssd.dump", O_RDWR, 0644);
-    if (fd < 0) {
-        log_error("open /home/manj/ssd.dump failed: %s", strerror(errno));
-        return MC_ERROR;
-    }
-
-    base = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    if (base == ((void *) -1)) {
-        log_error("mmap alloc %zu bytes for %"PRIu32" slabs failed: %s",
-                  size, max_nslab, strerror(errno));
-        return MC_ENOMEM;
-    }
-
-    log_debug(LOG_INFO, "pre-allocated %zu bytes for %"PRIu32" slabs",
-              size, max_nslab);
-
-    curr = base;
-
-    slab_table = mc_alloc(sizeof(*slab_table) * max_nslab);
-    if (slab_table == NULL) {
-        log_error("create of slab table with %"PRIu32" entries failed: %s",
-                  max_nslab, strerror(errno));
-        return MC_ENOMEM;
-    }
-
-    log_debug(LOG_VVERB, "created slab table with %"PRIu32" entries",
-              max_nslab);
-
-    return MC_OK;
-}
-
-static void
-slab_heapinfo_deinit(void)
-{
-    int status;
-    size_t size;
-
-    if (base == NULL) {
-        return;
-    }
-
-    size = max_nslab * settings.slab_size;
-
-    status = munmap(base, size);
-    if (status < 0) {
-        log_error("munmap %zu bytes at %p addr failed, ignored: %s,", size,
-                  base, strerror(errno));
-    }
-}
-
 /*
  * Initialize the slab module
  */
 rstatus_t
 slab_init(void)
 {
-    rstatus_t status;
+    struct slab *slab;
+    struct slabaddr *saddr;
+    size_t size;
+    uint8_t id, *base;
+    uint32_t i;
 
     pthread_mutex_init(&slab_lock, NULL);
-    slab_slabclass_init();
-    status = slab_heapinfo_init();
 
-    return status;
+    slab_slabclass_init();
+
+    /*
+     * For now, in-memory slabs equals the number of usable slabclass. In
+     * future, this would be controlled by the usable space that would
+     * be available to be in-memory
+     */
+    nslab = 0;
+    max_nslab = slabclass_max_id; /* slabclass 0 has no slabs */
+    size = max_nslab * settings.slab_size;
+
+    slabtable = mc_alloc(sizeof(*slabtable) * max_nslab);
+    if (slabtable == NULL) {
+        log_error("slabtable create with %"PRIu32" entries failed: %s",
+                  max_nslab, strerror(errno));
+        return MC_ENOMEM;
+    }
+    log_debug(LOG_INFO, "created slabtable of %zu bytes with %"PRIu32" "
+              "entries", 100, max_nslab);
+
+    base = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS,
+                -1, 0);
+    if (base == ((void *) -1)) {
+        log_error("mmap %zu bytes for %"PRIu32" slabs failed: %s",
+                  size, max_nslab, strerror(errno));
+        mc_free(slabtable);
+        return MC_ENOMEM;
+    }
+    log_debug(LOG_INFO, "pre-allocated %zu bytes for %"PRIu32" in-memory slabs",
+              size, max_nslab);
+
+    /* populate the slabtable with in-memory slabs */
+    for (i = 0, id = SLABCLASS_MIN_ID; id <= slabclass_max_id; id++, i++) {
+        slab = (struct slab *)base;
+        base += settings.slab_size;
+
+        saddr = &slabtable[nslab];
+        saddr->offset = nslab * settings.slab_size;
+        nslab++;
+        log_debug(LOG_INFO, "new slab %p allocated at pos %u", slab, nslab - 1);
+
+        /* link the nslab into the slabclass identified by the given id */
+        slab_add_one(slab, id);
+    }
+    ASSERT(nslab == max_nslab);
+
+    return MC_OK;
 }
 
 void
 slab_deinit(void)
 {
-    slab_heapinfo_deinit();
-    slab_slabclass_deinit();
+    /* FIXME: munmap */
 }
 
 static void
@@ -301,51 +275,16 @@ slab_heap_full(void)
     return (nslab >= max_nslab) ? true : false;
 }
 
-static struct slab *
-slab_heap_alloc(void)
-{
-    struct slab *slab;
-
-    slab = (struct slab *)curr;
-    curr += settings.slab_size;
-
-    return slab;
-}
-
-static void
-slab_table_update(struct slab *slab)
-{
-    ASSERT(nslab < max_nslab);
-
-    slab_table[nslab] = slab;
-    nslab++;
-
-    log_debug(LOG_VERB, "new slab %p allocated at pos %u", slab,
-              nslab - 1);
-}
-
 /*
  * Get a raw slab from the slab pool.
  */
 static struct slab *
 slab_get_new(void)
 {
-    struct slab *slab;
+    ASSERT(slab_heap_full());
 
-    if (slab_heap_full()) {
-        return NULL;
-    }
-
-    slab = slab_heap_alloc();
-    if (slab == NULL) {
-        return NULL;
-    }
-
-    slab_table_update(slab);
-
-    return slab;
+    return NULL;
 }
-
 
 /*
  * All the prep work before start using a slab.
@@ -358,10 +297,6 @@ slab_add_one(struct slab *slab, uint8_t id)
     uint32_t i, offset;
 
     p = &slabclass[id];
-
-    stats_slab_incr(id, slab_alloc);
-    stats_slab_incr(id, slab_curr);
-    stats_slab_settime(id, slab_alloc_ts, time_now());
 
     /* initialize slab header */
     slab_hdr_init(slab, id);
@@ -386,19 +321,13 @@ slab_get(uint8_t id)
 {
     struct slab *slab;
 
-    stats_slab_incr(id, slab_req);
-    stats_slab_settime(id, slab_req_ts, time_now());
-
     ASSERT(slabclass[id].free_item == NULL);
 
     slab = slab_get_new();
     if (slab == NULL) {
-        stats_slab_incr(id, slab_error);
-        stats_slab_settime(id, slab_error_ts, time_now());
         return MC_ENOMEM;
     }
 
-    stats_slab_settime(id, slab_new_ts, time_now());
     /*
      * Link the new slab into the slabclass identified
      * by the given id
@@ -425,6 +354,7 @@ _slab_get_item(uint8_t id)
     p = &slabclass[id];
 
     if (p->free_item == NULL) {
+        NOT_REACHED();
         status = slab_get(id);
         if (status != MC_OK) {
             return NULL;
@@ -452,6 +382,8 @@ slab_get_item(uint8_t id)
 {
     struct item *it;
 
+    log_debug(LOG_INFO, "get it from slab with id %"PRIu8, id);
+
     ASSERT(id >= SLABCLASS_MIN_ID && id <= slabclass_max_id);
 
     pthread_mutex_lock(&slab_lock);
@@ -467,4 +399,48 @@ slab_get_item(uint8_t id)
 void
 slab_put_item(struct item *it)
 {
+#if 0
+    struct slabclass *p;
+    struct item *lit;
+    uint32_t offset;
+#endif
+
+    log_debug(LOG_INFO, "put it '%.*s' at offset %"PRIu32" with id %"PRIu8,
+              it->nkey, item_key(it), it->offset, it->id);
+
+#if 0
+    /*
+     * FIXME: We can't do this, because upper layers keep a direct reference
+     * to lit and maybe even it and that sucks because now if they try to
+     * reference it, we have changed it underneath
+     */
+    p = &slabclass[it->id];
+
+    ASSERT(p->free_item != NULL);
+
+    /* last non-free item */
+    lit = (struct item *)((uint8_t*)p->free_item - p->size);
+
+    /* there is only one item in this slab, which is about to be freed */
+    if (lit == it) {
+        p->free_item = lit;
+        p->nfree_item++;
+        return;
+    }
+
+    /*
+     * Move lit into space occupied by it and adjust offset.
+     * FIXME: what if lit->refcount > 0
+     */
+    log_debug(LOG_INFO, "move it '%.*s' with id %"PRIu8" at offset %"PRIu32" "
+              "to offset %"PRIu32" ", lit->nkey, item_key(lit), lit->id,
+              lit->offset, it->offset);
+    p->free_item = lit;
+    p->nfree_item++;
+
+    /* move the lit to it slot */
+    offset = it->offset;
+    memcpy(it, lit, p->size);
+    lit->offset = offset;
+#endif
 }
