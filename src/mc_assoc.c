@@ -36,7 +36,6 @@
 #define HASH_DEFAULT_POWER      16
 
 extern struct settings settings;
-extern pthread_mutex_t cache_lock;
 
 static struct item_slh *primary_hashtable;  /* primary (main) hash table */
 static uint32_t nhash_item;                 /* # items in hash table */
@@ -106,7 +105,6 @@ assoc_find(const char *key, size_t nkey)
     struct item *it;
     uint32_t depth;
 
-    ASSERT(pthread_mutex_trylock(&cache_lock) != 0);
     ASSERT(key != NULL && nkey != 0);
 
     bucket = assoc_get_bucket(key, nkey);
@@ -126,7 +124,6 @@ assoc_insert(struct item *it)
 {
     struct item_slh *bucket;
 
-    ASSERT(pthread_mutex_trylock(&cache_lock) != 0);
     ASSERT(assoc_find(item_key(it), it->nkey) == NULL);
 
     bucket = assoc_get_bucket(item_key(it), it->nkey);
@@ -140,7 +137,6 @@ assoc_delete(const char *key, size_t nkey)
     struct item_slh *bucket;
     struct item *it, *prev;
 
-    ASSERT(pthread_mutex_trylock(&cache_lock) != 0);
     ASSERT(assoc_find(key, nkey) != NULL);
 
     bucket = assoc_get_bucket(key, nkey);

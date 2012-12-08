@@ -34,8 +34,6 @@
 
 extern struct settings settings;
 
-pthread_mutex_t cache_lock; /* lock protecting hash */
-
 /*
  * Return true if the item has expired, otherwise return false. Items
  * with expiry of 0 are considered as unexpirable.
@@ -51,7 +49,6 @@ item_expired(struct item *it)
 void
 item_init(void)
 {
-    pthread_mutex_init(&cache_lock, NULL);
 }
 
 void
@@ -91,7 +88,6 @@ item_2_slab(struct item *it)
 static void
 item_acquire_refcount(struct item *it)
 {
-    ASSERT(pthread_mutex_trylock(&cache_lock) != 0);
     ASSERT(it->magic == ITEM_MAGIC);
 
     it->refcount++;
@@ -101,7 +97,6 @@ item_acquire_refcount(struct item *it)
 static void
 item_release_refcount(struct item *it)
 {
-    ASSERT(pthread_mutex_trylock(&cache_lock) != 0);
     ASSERT(it->magic == ITEM_MAGIC);
     ASSERT(it->refcount > 0);
 
@@ -190,13 +185,7 @@ struct item *
 item_alloc(uint8_t id, char *key, size_t nkey, uint32_t flags,
            rel_time_t exptime, uint32_t nbyte)
 {
-    struct item *it;
-
-    pthread_mutex_lock(&cache_lock);
-    it = _item_alloc(id, key, nkey, flags, exptime, nbyte);
-    pthread_mutex_unlock(&cache_lock);
-
-    return it;
+    return _item_alloc(id, key, nkey, flags, exptime, nbyte);
 }
 
 static void
@@ -276,9 +265,7 @@ _item_remove(struct item *it)
 void
 item_remove(struct item *it)
 {
-    pthread_mutex_lock(&cache_lock);
     _item_remove(it);
-    pthread_mutex_unlock(&cache_lock);
 }
 
 /*
@@ -287,10 +274,8 @@ item_remove(struct item *it)
 void
 item_delete(struct item *it)
 {
-    pthread_mutex_lock(&cache_lock);
     _item_unlink(it);
     _item_remove(it);
-    pthread_mutex_unlock(&cache_lock);
 }
 
 /*
@@ -352,13 +337,7 @@ _item_get(const char *key, size_t nkey)
 struct item *
 item_get(const char *key, size_t nkey)
 {
-    struct item *it;
-
-    pthread_mutex_lock(&cache_lock);
-    it = _item_get(key, nkey);
-    pthread_mutex_unlock(&cache_lock);
-
-    return it;
+    return _item_get(key, nkey);
 }
 
 /*
@@ -423,11 +402,5 @@ _item_store(struct item *it, req_type_t type, struct conn *c)
 item_store_result_t
 item_store(struct item *it, req_type_t type, struct conn *c)
 {
-    item_store_result_t ret;
-
-    pthread_mutex_lock(&cache_lock);
-    ret = _item_store(it, type, c);
-    pthread_mutex_unlock(&cache_lock);
-
-    return ret;
+    return _item_store(it, type, c);
 }

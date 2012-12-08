@@ -33,14 +33,12 @@
 #include <mc_core.h>
 
 extern struct settings settings;
-extern pthread_mutex_t cache_lock;
 
 struct slabclass slabclass[SLABCLASS_MAX_IDS]; /* collection of slabs bucketed by slabclass */
 uint8_t slabclass_max_id;                      /* maximum slabclass id */
 static struct slabaddr *slabtable;             /* table of all slabs in the system */
 static uint32_t nslab;                         /* # slab allocated */
 static uint32_t max_nslab;                     /* max # slab allowed */
-pthread_mutex_t slab_lock;                     /* lock protecting slabclass and other globals */
 
 static void slab_add_one(struct slab *slab, uint8_t id);
 
@@ -77,7 +75,6 @@ slab_print(void)
 void
 slab_acquire_refcount(struct slab *slab)
 {
-    ASSERT(pthread_mutex_trylock(&cache_lock) != 0);
     ASSERT(slab->magic == SLAB_MAGIC);
     slab->refcount++;
 }
@@ -85,7 +82,6 @@ slab_acquire_refcount(struct slab *slab)
 void
 slab_release_refcount(struct slab *slab)
 {
-    ASSERT(pthread_mutex_trylock(&cache_lock) != 0);
     ASSERT(slab->magic == SLAB_MAGIC);
     ASSERT(slab->refcount > 0);
     slab->refcount--;
@@ -200,8 +196,6 @@ slab_init(void)
     size_t size;
     uint8_t id, *base;
     uint32_t i;
-
-    pthread_mutex_init(&slab_lock, NULL);
 
     slab_slabclass_init();
 
@@ -344,13 +338,14 @@ slab_get(uint8_t id)
  * If the current slab is empty, we get a new slab from the slab allocator
  * and return the next item from this new slab.
  */
-static struct item *
-_slab_get_item(uint8_t id)
+struct item *
+slab_get_item(uint8_t id)
 {
     rstatus_t status;
     struct slabclass *p;
     struct item *it;
 
+    ASSERT(id >= SLABCLASS_MIN_ID && id <= slabclass_max_id);
     p = &slabclass[id];
 
     if (p->free_item == NULL) {
@@ -373,22 +368,6 @@ _slab_get_item(uint8_t id)
 
     log_debug(LOG_VERB, "get new it at offset %"PRIu32" with id %"PRIu8"",
               it->offset, it->id);
-
-    return it;
-}
-
-struct item *
-slab_get_item(uint8_t id)
-{
-    struct item *it;
-
-    log_debug(LOG_INFO, "get it from slab with id %"PRIu8, id);
-
-    ASSERT(id >= SLABCLASS_MIN_ID && id <= slabclass_max_id);
-
-    pthread_mutex_lock(&slab_lock);
-    it = _slab_get_item(id);
-    pthread_mutex_unlock(&slab_lock);
 
     return it;
 }
