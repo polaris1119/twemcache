@@ -466,7 +466,7 @@ stats_init(void)
 {
     stats_template_init();
     stats_slab_getstatic(aggregator.stats_slabs_const);
-    num_updaters = settings.num_workers + 1; /* +1 to include dispatcher */
+    num_updaters = 2; /* +1 to include dispatcher */
 }
 
 void
@@ -587,7 +587,6 @@ stats_settings(void *c)
 {
     stats_print(c, "accepting_conns", "%u", (unsigned int)settings.accepting_conns);
     stats_print(c, "daemonize", "%u", (unsigned int)settings.daemonize);
-    stats_print(c, "num_workers", "%d", settings.num_workers);
     stats_print(c, "reqs_per_event", "%d", settings.reqs_per_event);
     stats_print(c, "log_filename", "%s", settings.log_filename);
     stats_print(c, "verbosity", "%d", settings.verbose);

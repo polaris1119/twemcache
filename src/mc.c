@@ -74,8 +74,6 @@
 
 #define MC_HASH_MAX_POWER   HASH_MAX_POWER
 
-#define MC_WORKERS          1
-
 #define MC_REQ_PER_EVENT    20
 #define MC_MAX_CONNS        1024
 #define MC_BACKLOG          1024
@@ -139,9 +137,9 @@ mc_show_usage(void)
 {
     log_stderr(
         "Usage: twemcache [-?hVdDS] [-o output file] [-v verbosity level]" CRLF
-        "           [-A stats aggr interval] [-e hash power] [-t threads]" CRLF
+        "           [-A stats aggr interval] [-e hash power] " CRLF
         "           [-R max requests]  [-b backlog] [-p port] " CRLF
-        "           [-M eviction strategy] [-f factor] [-m max memory] " CRLF
+        "           [-f factor] [-m max memory] " CRLF
         "           [-n min item chunk size] [-I slab size]" CRLF
         "           [-z slab profile]" CRLF
         "");
@@ -160,8 +158,7 @@ mc_show_usage(void)
         "  -e, --hash-power=N          : set the hash table size as a power of 2 (default: 0, adjustable)" CRLF
         " ",
         MC_LOG_FILE != NULL ? MC_LOG_FILE : "stderr", MC_LOG_DEFAULT, MC_LOG_MIN, MC_LOG_MAX,
-        MC_STATS_INTVL,
-        MC_WORKERS);
+        MC_STATS_INTVL);
     log_stderr(
         "  -R, --max-requests=N        : set the maximum number of requests per event (default: %d)" CRLF
         "  -b, --backlog=N             : set the backlog queue limit (default %d)" CRLF
@@ -292,8 +289,6 @@ mc_set_default_options(void)
 
     stats_set_interval(MC_STATS_INTVL);
 
-    settings.num_workers = MC_WORKERS;
-
     settings.reqs_per_event = MC_REQ_PER_EVENT;
     settings.maxconns = MC_MAX_CONNS;
     settings.backlog = MC_BACKLOG;
@@ -401,16 +396,6 @@ mc_get_options(int argc, char **argv)
             }
 
             settings.hash_power = value;
-            break;
-
-        case 't':
-            value = mc_atoi(optarg, strlen(optarg));
-            if (value <= 0) {
-                log_stderr("twemcache: option -t requires a non zero number");
-                return MC_ERROR;
-            }
-
-            settings.num_workers = value;
             break;
 
         case 'R':
@@ -756,8 +741,7 @@ mc_print_sizes(void)
 static void
 mc_print(void)
 {
-    loga("%s-%s started on pid %d with %d worker threads", PACKAGE,
-         MC_VERSION_STRING, getpid(), settings.num_workers);
+    loga("%s-%s started on pid %d", PACKAGE, MC_VERSION_STRING, getpid());
 
     loga("configured with debug logs %s, asserts %s, panic %s, stats %s ",
          MC_DEBUG_LOG ? "enabled" : "disabled",

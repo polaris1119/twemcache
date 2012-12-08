@@ -203,8 +203,6 @@ struct settings {
 
     struct timeval  stats_agg_intvl;              /* stats   : how often we aggregate stats */
 
-    int             num_workers;                  /* process : number of workers driven by libevent */
-
     int             reqs_per_event;               /* network : max # of requests to process per io event */
     int             maxconns;                     /* network : max connections */
     int             backlog;                      /* network : tcp backlog */

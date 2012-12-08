@@ -33,10 +33,9 @@
 
 extern struct settings settings;
 
-struct thread_worker *threads;       /* worker threads */
+struct thread_worker *threads;       /* worker thread */
 struct thread_aggregator aggregator; /* aggregator thread */
 struct thread_key keys;              /* thread-locak keys */
-static int last_thread;              /* last thread we assigned connection to most recently */
 
 static int init_count;               /* # worker threads inited */
 static pthread_mutex_t init_lock;    /* init threads lock */
@@ -303,8 +302,11 @@ thread_setup_aggregator(void)
         return MC_ERROR;
     }
 
-    /* +1 because we also aggregate from dispatcher */
-    sem_init(&aggregator.stats_sem, 0, settings.num_workers + 1);
+    /*
+     * We only have two threads: dispatcher and worker. The aggregator
+     * collects stats over dispatcher and worker thread.
+     */
+    sem_init(&aggregator.stats_sem, 0, 2);
 
     aggregator.stats_thread = stats_thread_init();
     if (aggregator.stats_thread == NULL) {
@@ -347,9 +349,8 @@ thread_dispatch(int sd, conn_state_t state, int ev_flags)
         return MC_ENOMEM;
     }
 
-    tid = (last_thread + 1) % settings.num_workers;
+    tid = 0;
     t = threads + tid;
-    last_thread = tid;
 
     conn_cq_push(&t->new_cq, c);
 
@@ -372,15 +373,13 @@ thread_init(struct event_base *main_base)
 {
     rstatus_t status;
     err_t err;
-    int nworkers = settings.num_workers;
+    int nworkers = 1;
     struct thread_worker *dispatcher;
     int i;
 
     init_count = 0;
     pthread_mutex_init(&init_lock, NULL);
     pthread_cond_init(&init_cond, NULL);
-
-    last_thread = -1;
 
     /* dispatcher takes the extra (last) slice of thread descriptor */
     threads = mc_zalloc(sizeof(*threads) * (1 + nworkers));
