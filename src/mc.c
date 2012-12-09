@@ -72,8 +72,6 @@
 #define MC_STATS_MAX_INTVL  STATS_MAX_INTVL
 #define MC_STATS_INTVL      STATS_DEFAULT_INTVL
 
-#define MC_HASH_MAX_POWER   HASH_MAX_POWER
-
 #define MC_REQ_PER_EVENT    20
 #define MC_MAX_CONNS        1024
 #define MC_BACKLOG          1024
@@ -137,8 +135,7 @@ mc_show_usage(void)
 {
     log_stderr(
         "Usage: twemcache [-?hVdDS] [-o output file] [-v verbosity level]" CRLF
-        "           [-A stats aggr interval] [-e hash power] " CRLF
-        "           [-R max requests]  [-b backlog] [-p port] " CRLF
+        "           [-A stats aggr interval] [-R max requests]  [-b backlog] [-p port] " CRLF
         "           [-f factor] [-m max memory] " CRLF
         "           [-n min item chunk size] [-I slab size]" CRLF
         "           [-z slab profile]" CRLF
@@ -155,7 +152,6 @@ mc_show_usage(void)
         "  -o, --output=S              : set the logging file (default: %s)" CRLF
         "  -v, --verbosity=N           : set the logging level (default: %d, min: %d, max: %d)" CRLF
         "  -A, --stats-aggr-interval=N : set the stats aggregation interval in usec (default: %d usec)" CRLF
-        "  -e, --hash-power=N          : set the hash table size as a power of 2 (default: 0, adjustable)" CRLF
         " ",
         MC_LOG_FILE != NULL ? MC_LOG_FILE : "stderr", MC_LOG_DEFAULT, MC_LOG_MIN, MC_LOG_MAX,
         MC_STATS_INTVL);
@@ -298,7 +294,6 @@ mc_set_default_options(void)
     settings.maxbytes = MC_MAXBYTES;
     settings.chunk_size = MC_CHUNK_SIZE;
     settings.slab_size = MC_SLAB_SIZE;
-    settings.hash_power = 0;
 
     settings.accepting_conns = true;
 
@@ -380,22 +375,6 @@ mc_get_options(int argc, char **argv)
 
             stats_set_interval(value);
 
-            break;
-
-        case 'e':
-            value = mc_atoi(optarg, strlen(optarg));
-            if (value <= 0) {
-                log_stderr("twemcache: option -e requires a positive number");
-                return MC_ERROR;
-            }
-
-            if (value > MC_HASH_MAX_POWER) {
-                log_stderr("twemcache: hash power cannot be greater than %d",
-                           MC_HASH_MAX_POWER);
-                return MC_ERROR;
-            }
-
-            settings.hash_power = value;
             break;
 
         case 'R':
@@ -533,7 +512,6 @@ mc_get_options(int argc, char **argv)
 
             case 'v':
             case 'A':
-            case 'e':
             case 't':
             case 'R':
             case 'b':

@@ -30,6 +30,8 @@
 #ifndef _MC_ITEMS_H_
 #define _MC_ITEMS_H_
 
+#include <mc_slabs.h>
+
 typedef enum item_flags {
     ITEM_LINKED  = 1,  /* item in hash */
     ITEM_SLABBED = 2,  /* item in free q */
@@ -39,6 +41,18 @@ typedef enum item_store_result {
     NOT_STORED,
     STORED,
 } item_store_result_t;
+
+struct item_idx {
+    TAILQ_ENTRY(item_idx) h_tqe;  /* link in hash */
+
+    uint8_t               nkey;   /* key length */
+    uint8_t               *key;   /* key */
+
+    struct slabaddr       saddr;  /* slab addr */
+    uint32_t              offset; /* item offset within slab */
+};
+
+TAILQ_HEAD(itx_tqh, item_idx);
 
 /*
  * Every item chunk in the twemcache starts with an header (struct item)
@@ -154,7 +168,7 @@ char *item_data(struct item *it);
 struct slab *item_2_slab(struct item *it);
 void item_hdr_init(struct item *it, uint32_t offset, uint8_t id);
 uint8_t item_slabid(uint8_t nkey, uint32_t nbyte);
-struct item *item_alloc(uint8_t id, char *key, size_t nkey, uint32_t dataflags, rel_time_t exptime, uint32_t nbyte);
+struct item *item_alloc(uint8_t id, char *key, uint8_t nkey, uint32_t dataflags, rel_time_t exptime, uint32_t nbyte);
 void item_delete(struct item *it);
 void item_remove(struct item *it);
 struct item *item_get(const char *key, size_t nkey);

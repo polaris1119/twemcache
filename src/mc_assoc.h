@@ -30,13 +30,11 @@
 #ifndef _MC_ASSOC_H_
 #define _MC_ASSOC_H_
 
-#define HASH_MAX_POWER  32
-
 rstatus_t assoc_init(void);
 void assoc_deinit(void);
 
-struct item *assoc_find(const char *key, size_t nkey);
-void assoc_insert(struct item *item);
-void assoc_delete(const char *key, size_t nkey);
+struct item_idx *assoc_find(uint8_t *key, size_t nkey);
+void assoc_insert(struct item_idx *itx);
+void assoc_delete(uint8_t *key, size_t nkey);
 
 #endif

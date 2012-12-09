@@ -32,43 +32,39 @@
 #define HASHSIZE(_n) (1UL << (_n))
 #define HASHMASK(_n) (HASHSIZE(_n) - 1)
 
-#define HASH_DEFAULT_MOVE_SIZE  1
-#define HASH_DEFAULT_POWER      16
+#define HASH_POWER  16
 
-extern struct settings settings;
+static struct itx_tqh *hashtable;   /* hash table */
+static uint32_t nhash_item;         /* # itx in hash table */
+static uint32_t hash_power;         /* # buckets = 2^hash_power */
 
-static struct item_slh *primary_hashtable;  /* primary (main) hash table */
-static uint32_t nhash_item;                 /* # items in hash table */
-static uint32_t hash_power;                 /* # buckets = 2^hash_power */
-
-static struct item_slh *
-assoc_create_table(uint32_t table_sz)
+static struct itx_tqh *
+assoc_create_table(uint32_t nbucket)
 {
-    struct item_slh *table;
+    struct itx_tqh *table;
     uint32_t i;
 
-    table = mc_alloc(sizeof(*table) * table_sz);
+    table = mc_alloc(sizeof(*table) * nbucket);
     if (table == NULL) {
         return NULL;
     }
 
-    for (i = 0; i < table_sz; i++) {
-        SLIST_INIT(&table[i]);
+    for (i = 0; i < nbucket; i++) {
+        TAILQ_INIT(&table[i]);
     }
 
     return table;
 }
 
-static struct item_slh *
-assoc_get_bucket(const char *key, size_t nkey)
+static struct itx_tqh *
+assoc_get_bucket(uint8_t *key, size_t nkey)
 {
-    struct item_slh *bucket;
-    uint32_t hv, curbucket;
+    struct itx_tqh *bucket;
+    uint32_t hv, idx;
 
     hv = hash(key, nkey, 0);
-    curbucket = hv & HASHMASK(hash_power);
-
-    bucket = &primary_hashtable[curbucket];
+    idx = hv & HASHMASK(hash_power);
+    bucket = &hashtable[idx];
 
     return bucket;
 }
@@ -76,17 +72,16 @@ assoc_get_bucket(const char *key, size_t nkey)
 rstatus_t
 assoc_init(void)
 {
-    uint32_t hashtable_sz;
+    uint32_t nbucket;
 
-    primary_hashtable = NULL;
-    hash_power = settings.hash_power > 0 ? settings.hash_power : HASH_DEFAULT_POWER;
+    hashtable = NULL;
+    hash_power = HASH_POWER;
 
     nhash_item = 0;
+    nbucket = HASHSIZE(hash_power);
 
-    hashtable_sz = HASHSIZE(hash_power);
-
-    primary_hashtable = assoc_create_table(hashtable_sz);
-    if (primary_hashtable == NULL) {
+    hashtable = assoc_create_table(nbucket);
+    if (hashtable == NULL) {
         return MC_ENOMEM;
     }
 
@@ -98,61 +93,47 @@ assoc_deinit(void)
 {
 }
 
-struct item *
-assoc_find(const char *key, size_t nkey)
+struct item_idx *
+assoc_find(uint8_t *key, size_t nkey)
 {
-    struct item_slh *bucket;
-    struct item *it;
-    uint32_t depth;
+    struct itx_tqh *bucket;
+    struct item_idx *itx;
 
     ASSERT(key != NULL && nkey != 0);
 
     bucket = assoc_get_bucket(key, nkey);
 
-    for (depth = 0, it = SLIST_FIRST(bucket); it != NULL;
-         depth++, it = SLIST_NEXT(it, h_sle)) {
-        if ((nkey == it->nkey) && (memcmp(key, item_key(it), nkey) == 0)) {
+    TAILQ_FOREACH(itx, bucket, h_tqe) {
+        if (nkey == itx->nkey && memcmp(key, itx->key, nkey == 0)) {
             break;
         }
     }
 
-    return it;
+    return itx;
 }
 
 void
-assoc_insert(struct item *it)
+assoc_insert(struct item_idx *itx)
 {
-    struct item_slh *bucket;
+    struct itx_tqh *bucket;
 
-    ASSERT(assoc_find(item_key(it), it->nkey) == NULL);
+    ASSERT(assoc_find(itx->key, itx->nkey) == NULL);
 
-    bucket = assoc_get_bucket(item_key(it), it->nkey);
-    SLIST_INSERT_HEAD(bucket, it, h_sle);
+    bucket = assoc_get_bucket(itx->key, itx->nkey);
+    TAILQ_INSERT_HEAD(bucket, itx, h_tqe);
     nhash_item++;
 }
 
 void
-assoc_delete(const char *key, size_t nkey)
+assoc_delete(uint8_t *key, size_t nkey)
 {
-    struct item_slh *bucket;
-    struct item *it, *prev;
-
-    ASSERT(assoc_find(key, nkey) != NULL);
+    struct itx_tqh *bucket;
+    struct item_idx *itx;
 
     bucket = assoc_get_bucket(key, nkey);
-
-    for (prev = NULL, it = SLIST_FIRST(bucket); it != NULL;
-         prev = it, it = SLIST_NEXT(it, h_sle)) {
-        if ((nkey == it->nkey) && (memcmp(key, item_key(it), nkey) == 0)) {
-            break;
-        }
-    }
-
-    if (prev == NULL) {
-        SLIST_REMOVE_HEAD(bucket, h_sle);
-    } else {
-        SLIST_REMOVE_AFTER(prev, h_sle);
-    }
+    itx = assoc_find(key, nkey);
+    ASSERT(itx != NULL);
+    TAILQ_REMOVE(bucket, itx, h_tqe);
 
     nhash_item--;
 }

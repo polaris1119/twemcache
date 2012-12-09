@@ -39,6 +39,7 @@ uint8_t slabclass_max_id;                      /* maximum slabclass id */
 static struct slabaddr *slabtable;             /* table of all slabs in the system */
 static uint32_t nslab;                         /* # slab allocated */
 static uint32_t max_nslab;                     /* max # slab allowed */
+uint8_t *base;
 
 static void slab_add_one(struct slab *slab, uint8_t id);
 
@@ -50,6 +51,12 @@ size_t
 slab_size(void)
 {
     return settings.slab_size - SLAB_HDR_SIZE;
+}
+
+uint8_t *
+slab_addr(uint32_t offset)
+{
+    return base + offset;
 }
 
 void
@@ -194,7 +201,7 @@ slab_init(void)
     struct slab *slab;
     struct slabaddr *saddr;
     size_t size;
-    uint8_t id, *base;
+    uint8_t id;
     uint32_t i;
 
     slab_slabclass_init();
@@ -240,6 +247,8 @@ slab_init(void)
 
         /* link the nslab into the slabclass identified by the given id */
         slab_add_one(slab, id);
+
+        slab->idx = (nslab - 1);
     }
     ASSERT(nslab == max_nslab);
 
@@ -307,29 +316,6 @@ slab_add_one(struct slab *slab, uint8_t id)
     p->free_item = (struct item *)&slab->data[0];
 }
 
-/*
- * Get a slab from the slab pool, if not empy.
- */
-static rstatus_t
-slab_get(uint8_t id)
-{
-    struct slab *slab;
-
-    ASSERT(slabclass[id].free_item == NULL);
-
-    slab = slab_get_new();
-    if (slab == NULL) {
-        return MC_ENOMEM;
-    }
-
-    /*
-     * Link the new slab into the slabclass identified
-     * by the given id
-     */
-    slab_add_one(slab, id);
-
-    return MC_OK;
-}
 
 /*
  * Get an item from the slab with a given id. We get an item either from:
@@ -341,22 +327,14 @@ slab_get(uint8_t id)
 struct item *
 slab_get_item(uint8_t id)
 {
-    rstatus_t status;
     struct slabclass *p;
     struct item *it;
 
     ASSERT(id >= SLABCLASS_MIN_ID && id <= slabclass_max_id);
     p = &slabclass[id];
 
-    if (p->free_item == NULL) {
-        NOT_REACHED();
-        status = slab_get(id);
-        if (status != MC_OK) {
-            return NULL;
-        }
-
-        ASSERT(p->free_item != NULL);
-    }
+    /* FIXME: there is always a free item */
+    ASSERT(p->free_item != NULL);
 
     /* return item from current slab */
     it = p->free_item;

@@ -30,8 +30,6 @@
 #ifndef _MC_SLABS_H_
 #define _MC_SLABS_H_
 
-#include <mc_items.h>
-
 struct slabaddr {
     uint32_t offset;    /* offset of slab */
 };
@@ -64,7 +62,7 @@ struct slab {
     uint16_t          refcount; /* # concurrent users */
     TAILQ_ENTRY(slab) s_tqe;    /* link in slab q */
     rel_time_t        utime;    /* last update time in secs */
-    uint32_t          padding;  /* unused */
+    uint32_t          idx;      /* idx in slabtable */
     uint8_t           data[1];  /* opaque data */
 };
 

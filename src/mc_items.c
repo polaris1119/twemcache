@@ -143,9 +143,9 @@ item_slabid(uint8_t nkey, uint32_t nbyte)
  * callers responsibilty to release this refcount when the item is inserted
  * into the hash or freed.
  */
-static struct item *
-_item_alloc(uint8_t id, char *key, uint8_t nkey, uint32_t dataflags,
-            rel_time_t exptime, uint32_t nbyte)
+struct item *
+item_alloc(uint8_t id, char *key, uint8_t nkey, uint32_t dataflags,
+           rel_time_t exptime, uint32_t nbyte)
 {
     struct item *it;
 
@@ -181,13 +181,6 @@ _item_alloc(uint8_t id, char *key, uint8_t nkey, uint32_t dataflags,
     return it;
 }
 
-struct item *
-item_alloc(uint8_t id, char *key, size_t nkey, uint32_t flags,
-           rel_time_t exptime, uint32_t nbyte)
-{
-    return _item_alloc(id, key, nkey, flags, exptime, nbyte);
-}
-
 static void
 item_free(struct item *it)
 {
@@ -199,7 +192,7 @@ item_free(struct item *it)
  * Link an item into the hash table and lru q
  */
 static void
-_item_link(struct item *it)
+item_link(struct item *it)
 {
     ASSERT(it->magic == ITEM_MAGIC);
     ASSERT(!item_is_linked(it));
@@ -211,7 +204,15 @@ _item_link(struct item *it)
 
     it->flags |= ITEM_LINKED;
 
-    assoc_insert(it);
+    /* FIXME: */
+    struct item_idx *itx = mc_alloc(sizeof(*itx));
+    ASSERT(itx != NULL);
+    itx->nkey = it->nkey;
+    itx->key = (uint8_t*)item_key(it);
+    itx->saddr.offset = 0;
+    itx->offset = it->offset;
+
+    assoc_insert(itx);
 }
 
 /*
@@ -219,7 +220,7 @@ _item_link(struct item *it)
  * item if it's refcount is zero.
  */
 static void
-_item_unlink(struct item *it)
+item_unlink(struct item *it)
 {
     ASSERT(it->magic == ITEM_MAGIC);
     ASSERT(item_is_linked(it));
@@ -243,8 +244,8 @@ _item_unlink(struct item *it)
  * Decrement the refcount on an item. Free an unliked item if its refcount
  * drops to zero.
  */
-static void
-_item_remove(struct item *it)
+void
+item_remove(struct item *it)
 {
     ASSERT(it->magic == ITEM_MAGIC);
     ASSERT(!item_is_slabbed(it));
@@ -262,27 +263,21 @@ _item_remove(struct item *it)
     }
 }
 
-void
-item_remove(struct item *it)
-{
-    _item_remove(it);
-}
-
 /*
  * Unlink an item and remove it (if its recount drops to zero).
  */
 void
 item_delete(struct item *it)
 {
-    _item_unlink(it);
-    _item_remove(it);
+    item_unlink(it);
+    item_remove(it);
 }
 
 /*
  * Replace one item with another in the hash table and lru q.
  */
 static void
-_item_replace(struct item *it, struct item *nit)
+item_replace(struct item *it, struct item *nit)
 {
     ASSERT(it->magic == ITEM_MAGIC);
     ASSERT(!item_is_slabbed(it));
@@ -294,8 +289,8 @@ _item_replace(struct item *it, struct item *nit)
               "with one at offset %"PRIu32" id %"PRIu8"", it->nkey,
               item_key(it), it->offset, it->id, nit->offset, nit->id);
 
-    _item_unlink(it);
-    _item_link(nit);
+    item_unlink(it);
+    item_link(nit);
 }
 
 /*
@@ -305,19 +300,22 @@ _item_replace(struct item *it, struct item *nit)
  * When a non-null item is returned, it's the callers responsibily to
  * release refcount on the item
  */
-static struct item *
-_item_get(const char *key, size_t nkey)
+struct item *
+item_get(const char *key, size_t nkey)
 {
+    struct item_idx *itx;
     struct item *it;
 
-    it = assoc_find(key, nkey);
-    if (it == NULL) {
-        log_debug(LOG_VERB, "get it '%.*s' not found", nkey, key);
+    itx = assoc_find(key, nkey);
+    if (itx == NULL) {
+        log_debug(LOG_VERB, "get itx '%.*s' not found", nkey, key);
         return NULL;
     }
 
+    it = (struct item *)(slab_addr(itx->saddr.offset) + itx->offset);
+
     if (item_expired(it)) {
-        _item_unlink(it);
+        item_unlink(it);
         stats_slab_incr(it->id, item_expire);
         stats_slab_settime(it->id, item_reclaim_ts, time_now());
         stats_slab_settime(it->id, item_expire_ts, it->exptime);
@@ -334,73 +332,36 @@ _item_get(const char *key, size_t nkey)
     return it;
 }
 
-struct item *
-item_get(const char *key, size_t nkey)
-{
-    return _item_get(key, nkey);
-}
 
 /*
  * Store an item in the cache according to the semantics of one of the
  * update commands - set
  */
-static item_store_result_t
-_item_store(struct item *it, req_type_t type, struct conn *c)
+item_store_result_t
+item_store(struct item *it, req_type_t type, struct conn *c)
 {
     item_store_result_t result;  /* item store result */
-    bool store_it;               /* store item ? */
     char *key;                   /* item key */
-    struct item *oit, *nit;      /* old (existing) item & new item */
+    struct item *oit;            /* old (existing) item */
 
     result = NOT_STORED;
-    store_it = true;
 
     key = item_key(it);
-    nit = NULL;
-    oit = _item_get(key, it->nkey);
-    if (oit == NULL) {
-        switch (type) {
-        case REQ_SET:
-            stats_slab_incr(it->id, set_success);
-            break;
+    oit = item_get(key, it->nkey);
 
-        default:
-            NOT_REACHED();
-        }
-    } else {
-        switch (type) {
-        case REQ_SET:
-            stats_slab_incr(it->id, set_success);
-            break;
-
-        default:
-            NOT_REACHED();
-        }
-    }
-
-    if (result == NOT_STORED && store_it) {
+    if (result == NOT_STORED) {
         if (oit != NULL) {
-            _item_replace(oit, it);
+            item_replace(oit, it);
         } else {
-            _item_link(it);
+            item_link(it);
         }
         result = STORED;
     }
 
     /* release our reference, if any */
     if (oit != NULL) {
-        _item_remove(oit);
-    }
-
-    if (nit != NULL) {
-        _item_remove(nit);
+        item_remove(oit);
     }
 
     return result;
-}
-
-item_store_result_t
-item_store(struct item *it, req_type_t type, struct conn *c)
-{
-    return _item_store(it, type, c);
 }
