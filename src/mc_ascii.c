@@ -301,7 +301,6 @@ asc_complete_nread(struct conn *c)
     if (!strcrlf(end)) {
         log_hexdump(LOG_NOTICE, c->req, c->req_len, "client error on c %d for "
                     "req of type %d with missing crlf", c->sd, c->req_type);
-
         asc_write_client_error(c);
     } else {
       ret = item_store(it, c->req_type, c);

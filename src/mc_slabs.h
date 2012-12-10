@@ -56,14 +56,11 @@ struct slabaddr {
  *       8-byte aligned boundary.
  */
 struct slab {
-    uint32_t          magic;    /* slab magic (const) */
-    uint8_t           cid;      /* slabclass id */
-    uint8_t           unused;   /* unused */
-    uint32_t          id;       /* slab id */
-    uint16_t          refcount; /* # concurrent users */
-    TAILQ_ENTRY(slab) s_tqe;    /* link in slab q */
-    rel_time_t        utime;    /* last update time in secs */
-    uint8_t           data[1];  /* opaque data */
+    uint32_t          magic;     /* slab magic (const) */
+    uint8_t           cid;       /* slab class id */
+    uint8_t           unused[3]; /* unused */
+    uint32_t          sid;       /* slab id */
+    uint8_t           data[1];   /* opaque data */
 };
 
 TAILQ_HEAD(slab_tqh, slab);
@@ -150,8 +147,6 @@ struct slabclass {
 
 size_t slab_size(void);
 void slab_print(void);
-void slab_acquire_refcount(struct slab *slab);
-void slab_release_refcount(struct slab *slab);
 size_t slab_item_size(uint8_t id);
 uint8_t slab_cid(size_t size);
 
@@ -160,5 +155,8 @@ void slab_deinit(void);
 
 struct item *slab_get_item(uint8_t id);
 void slab_put_item(struct item *it);
+
+uint8_t *slab_addr(uint32_t id);
+struct slab *slab_read(uint32_t id);
 
 #endif

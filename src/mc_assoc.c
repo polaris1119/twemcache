@@ -104,7 +104,7 @@ assoc_find(char *key, size_t nkey)
     bucket = assoc_get_bucket(key, nkey);
 
     TAILQ_FOREACH(itx, bucket, h_tqe) {
-        if (nkey == itx->nkey && memcmp(key, itx->key, nkey == 0)) {
+        if (nkey == itx->nkey && memcmp(key, itx->key, nkey) == 0) {
             break;
         }
     }

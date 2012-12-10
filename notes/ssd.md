@@ -16,6 +16,9 @@
 + http://www.ramsan.com/
 + http://www.theregister.co.uk/2009/04/13/schooner_memcached_mysql/
 + http://research.microsoft.com/en-us/um/people/antr/ms/ssd.pdf
++ http://highscalability.com/blog/2012/12/10/switch-your-databases-to-flash-storage-now-or-youre-doing-it.html
++ http://www.anandtech.com/show/6459/samsung-ssd-840-testing-the-endurance-of-tlc-nand
++ http://www.foundationdb.com/#SSDs
 
 ## tools
 

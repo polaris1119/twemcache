@@ -85,35 +85,16 @@ item_2_slab(struct item *it)
     return slab;
 }
 
-static void
-item_acquire_refcount(struct item *it)
-{
-    ASSERT(it->magic == ITEM_MAGIC);
-
-    it->refcount++;
-    slab_acquire_refcount(item_2_slab(it));
-}
-
-static void
-item_release_refcount(struct item *it)
-{
-    ASSERT(it->magic == ITEM_MAGIC);
-    ASSERT(it->refcount > 0);
-
-    it->refcount--;
-    slab_release_refcount(item_2_slab(it));
-}
-
 void
-item_hdr_init(struct item *it, uint32_t offset, uint8_t cid)
+item_hdr_init(struct item *it, uint32_t offset, uint8_t cid, uint32_t sid)
 {
     ASSERT(offset >= SLAB_HDR_SIZE && offset < settings.slab_size);
 
     it->magic = ITEM_MAGIC;
     it->offset = offset;
     it->cid = cid;
-    it->refcount = 0;
     it->flags = 0;
+    it->sid = sid;
 }
 
 uint8_t
@@ -138,10 +119,7 @@ item_slabcid(uint8_t nkey, uint32_t nbyte)
  * Allocate an item. We allocate an item by consuming the next free item
  * from slab of the item's an slab class.
  *
- * On success we return the pointer to the allocated item. The returned item
- * is refcounted so that it is not deleted under callers nose. It is the
- * callers responsibilty to release this refcount when the item is inserted
- * into the hash or freed.
+ * On success we return the pointer to the allocated item.
  */
 struct item *
 item_alloc(uint8_t cid, char *key, uint8_t nkey, uint32_t dataflags,
@@ -161,9 +139,6 @@ item_alloc(uint8_t cid, char *key, uint8_t nkey, uint32_t dataflags,
     ASSERT(!item_is_linked(it));
     ASSERT(!item_is_slabbed(it));
     ASSERT(it->offset != 0);
-    ASSERT(it->refcount == 0);
-
-    item_acquire_refcount(it);
 
     it->flags = 0;
     it->dataflags = dataflags;
@@ -175,8 +150,8 @@ item_alloc(uint8_t cid, char *key, uint8_t nkey, uint32_t dataflags,
     stats_slab_incr(cid, item_acquire);
 
     log_debug(LOG_VERB, "alloc it '%.*s' at offset %"PRIu32" with cid %"PRIu8
-              " expiry %u refcount %"PRIu16"", it->nkey, item_key(it),
-              it->offset, it->cid, it->exptime, it->refcount);
+              " expiry %u", it->nkey, item_key(it), it->offset, it->cid,
+              it->exptime);
 
     return it;
 }
@@ -209,15 +184,14 @@ item_link(struct item *it)
     ASSERT(itx != NULL);
     itx->nkey = it->nkey;
     itx->key = item_key(it);
-    itx->sid = it->cid;
+    itx->sid = it->sid;
     itx->offset = it->offset;
 
     assoc_insert(itx);
 }
 
 /*
- * Unlinks an item from the lru q and hash table. Free an unlinked
- * item if it's refcount is zero.
+ * Unlinks an item from the hash table and free it.
  */
 static void
 item_unlink(struct item *it)
@@ -231,18 +205,13 @@ item_unlink(struct item *it)
 
     if (item_is_linked(it)) {
         it->flags &= ~ITEM_LINKED;
-
         assoc_delete(item_key(it), it->nkey);
-
-        if (it->refcount == 0) {
-            item_free(it);
-        }
+        item_free(it);
     }
 }
 
 /*
- * Decrement the refcount on an item. Free an unliked item if its refcount
- * drops to zero.
+ * Free an item if it is unlinked.
  */
 void
 item_remove(struct item *it)
@@ -250,17 +219,15 @@ item_remove(struct item *it)
     ASSERT(it->magic == ITEM_MAGIC);
     ASSERT(!item_is_slabbed(it));
 
+    if (item_is_linked(it)) {
+        return;
+    }
+
     log_debug(LOG_DEBUG, "remove it '%.*s' at offset %"PRIu32" with flags "
-              "%02x cid %"PRId8" refcount %"PRIu16"", it->nkey, item_key(it),
-              it->offset, it->flags, it->cid, it->refcount);
+              "%02x cid %"PRId8"", it->nkey, item_key(it), it->offset,
+              it->flags, it->cid);
 
-    if (it->refcount != 0) {
-        item_release_refcount(it);
-    }
-
-    if (it->refcount == 0 && !item_is_linked(it)) {
-        item_free(it);
-    }
+    item_free(it);
 }
 
 /*
@@ -296,9 +263,6 @@ item_replace(struct item *it, struct item *nit)
 /*
  * Return an item if it hasn't been marked as expired, lazily expiring
  * item as-and-when needed
- *
- * When a non-null item is returned, it's the callers responsibily to
- * release refcount on the item
  */
 struct item *
 item_get(char *key, size_t nkey)
@@ -312,7 +276,9 @@ item_get(char *key, size_t nkey)
         return NULL;
     }
 
-    it = (struct item *)(slab_addr(itx->sid) + itx->offset);
+    struct slab *slab = slab_read(itx->sid);
+
+    it = (struct item *)((uint8_t *)slab + itx->offset);
 
     if (item_expired(it)) {
         item_unlink(it);
@@ -323,39 +289,28 @@ item_get(char *key, size_t nkey)
         return NULL;
     }
 
-    item_acquire_refcount(it);
-
     log_debug(LOG_VERB, "get it '%.*s' found at offset %"PRIu32" with flags "
-              "%02x cid %"PRIu8" refcount %"PRIu32"", it->nkey, item_key(it),
+              "%02x cid %"PRIu8"", it->nkey, item_key(it),
               it->offset, it->flags, it->cid);
 
     return it;
 }
 
 
-/*
- * Store an item in the cache according to the semantics of one of the
- * update commands - set
- */
 item_store_result_t
 item_store(struct item *it, req_type_t type, struct conn *c)
 {
-    item_store_result_t result;  /* item store result */
     char *key;                   /* item key */
     struct item *oit;            /* old (existing) item */
 
-    result = NOT_STORED;
-
     key = item_key(it);
+
     oit = item_get(key, it->nkey);
 
-    if (result == NOT_STORED) {
-        if (oit != NULL) {
-            item_replace(oit, it);
-        } else {
-            item_link(it);
-        }
-        result = STORED;
+    if (oit != NULL) {
+        item_replace(oit, it);
+    } else {
+        item_link(it);
     }
 
     /* release our reference, if any */
@@ -363,5 +318,5 @@ item_store(struct item *it, req_type_t type, struct conn *c)
         item_remove(oit);
     }
 
-    return result;
+    return STORED;
 }

@@ -94,10 +94,11 @@ struct item {
     uint32_t          nbyte;      /* date size */
     uint32_t          offset;     /* offset of item in slab */
     uint32_t          dataflags;  /* data flags opaque to the server */
-    uint16_t          refcount;   /* # concurrent users of item */
+    uint16_t          unused;     /* # concurrent users of item */
     uint8_t           flags;      /* item flags */
-    uint8_t           cid;        /* slab class id */
     uint8_t           nkey;       /* key length */
+    uint8_t           cid;        /* slab class id */
+    uint32_t          sid;        /* slab id */
     char              end[1];     /* item data */
 };
 
@@ -166,12 +167,13 @@ void item_init(void);
 void item_deinit(void);
 char *item_data(struct item *it);
 struct slab *item_2_slab(struct item *it);
-void item_hdr_init(struct item *it, uint32_t offset, uint8_t cid);
 uint8_t item_slabcid(uint8_t nkey, uint32_t nbyte);
 struct item *item_alloc(uint8_t cid, char *key, uint8_t nkey, uint32_t dataflags, rel_time_t exptime, uint32_t nbyte);
 void item_delete(struct item *it);
 void item_remove(struct item *it);
 struct item *item_get(char *key, size_t nkey);
 item_store_result_t item_store(struct item *it, req_type_t type, struct conn *c);
+
+void item_hdr_init(struct item *it, uint32_t offset, uint8_t cid, uint32_t sid);
 
 #endif

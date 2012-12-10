@@ -39,9 +39,8 @@ uint8_t slabclass_max_id;                      /* maximum slabclass id */
 static struct slabaddr *slabtable;             /* table of all slabs in the system */
 static uint32_t nslab;                         /* # slab allocated */
 static uint32_t max_nslab;                     /* max # slab allowed */
-uint8_t *base;
 
-static void slab_add_one(struct slab *slab, uint8_t cid);
+uint8_t *mbase;                                /* base of in-memory slabs */
 
 /*
  * Return the usable space for item sized chunks that would be carved out
@@ -56,7 +55,13 @@ slab_size(void)
 uint8_t *
 slab_addr(uint32_t id)
 {
-    return base + slabtable[id].offset;
+    return mbase + slabtable[id].offset;
+}
+
+struct slab *
+slab_read(uint32_t id)
+{
+    return (struct slab *)(mbase + slabtable[id].offset);
 }
 
 void
@@ -79,19 +84,16 @@ slab_print(void)
     }
 }
 
-void
-slab_acquire_refcount(struct slab *slab)
+static void
+slab_dump(void)
 {
-    ASSERT(slab->magic == SLAB_MAGIC);
-    slab->refcount++;
-}
+    uint32_t i;
+    struct slab *slab;
 
-void
-slab_release_refcount(struct slab *slab)
-{
-    ASSERT(slab->magic == SLAB_MAGIC);
-    ASSERT(slab->refcount > 0);
-    slab->refcount--;
+    for (i = 0; i < max_nslab; i++) {
+        slab = slab_read(i);
+        loga("slab %p id %"PRIu8" cid %"PRIu8"", slab, slab->sid, slab->cid);
+    }
 }
 
 /*
@@ -193,6 +195,35 @@ slab_slabclass_init(void)
 }
 
 /*
+ * All the prep work before start using a slab.
+ */
+static void
+slab_add_one(struct slab *slab, uint8_t cid, uint32_t sid)
+{
+    struct slabclass *p;
+    struct item *it;
+    uint32_t i, offset;
+
+    p = &slabclass[cid];
+
+    /* init slab header */
+    slab->magic = SLAB_MAGIC;
+    slab->cid = cid;
+    slab->sid = sid;
+
+    /* initialize all slab items */
+    for (i = 0; i < p->nitem; i++) {
+        it = slab_2_item(slab, i, p->size);
+        offset = (uint32_t)((uint8_t *)it - (uint8_t *)slab);
+        item_hdr_init(it, offset, cid, sid);
+    }
+
+    /* make this slab as the current slab */
+    p->nfree_item = p->nitem;
+    p->free_item = (struct item *)&slab->data[0];
+}
+
+/*
  * Initialize the slab module
  */
 rstatus_t
@@ -201,8 +232,7 @@ slab_init(void)
     struct slab *slab;
     struct slabaddr *saddr;
     size_t size;
-    uint8_t cid;
-    uint32_t i;
+    uint8_t cid, *cur;
 
     slab_slabclass_init();
 
@@ -224,9 +254,9 @@ slab_init(void)
     log_debug(LOG_INFO, "created slabtable of %zu bytes with %"PRIu32" "
               "entries", 100, max_nslab);
 
-    base = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS,
-                -1, 0);
-    if (base == ((void *) -1)) {
+    mbase = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS,
+                 -1, 0);
+    if (mbase == ((void *) -1)) {
         log_error("mmap %zu bytes for %"PRIu32" slabs failed: %s",
                   size, max_nslab, strerror(errno));
         mc_free(slabtable);
@@ -236,19 +266,19 @@ slab_init(void)
               size, max_nslab);
 
     /* populate the slabtable with in-memory slabs */
-    for (i = 0, cid = SLABCLASS_MIN_ID; cid <= slabclass_max_id; cid++, i++) {
-        slab = (struct slab *)base;
-        base += settings.slab_size;
+    for (nslab = 0, cur = mbase, cid = SLABCLASS_MIN_ID;
+         cid <= slabclass_max_id;
+         nslab++, cur += settings.slab_size, cid++) {
+
+        slab = (struct slab *)cur;
 
         saddr = &slabtable[nslab];
         saddr->offset = nslab * settings.slab_size;
-        nslab++;
-        log_debug(LOG_INFO, "new slab %p allocated at pos %u", slab, nslab - 1);
-
         /* link the nslab into the slabclass identified by the given cid */
-        slab_add_one(slab, cid);
+        slab_add_one(slab, cid, nslab);
 
-        slab->id = (nslab - 1);
+        log_debug(LOG_INFO, "new slab %p allocated at pos %u", slab, nslab);
+
     }
     ASSERT(nslab == max_nslab);
 
@@ -260,45 +290,6 @@ slab_deinit(void)
 {
     /* FIXME: munmap */
 }
-
-static void
-slab_hdr_init(struct slab *slab, uint8_t cid)
-{
-    ASSERT(cid >= SLABCLASS_MIN_ID && cid <= slabclass_max_id);
-
-    slab->magic = SLAB_MAGIC;
-    slab->cid = cid;
-    slab->unused = 0;
-    slab->refcount = 0;
-}
-
-/*
- * All the prep work before start using a slab.
- */
-static void
-slab_add_one(struct slab *slab, uint8_t cid)
-{
-    struct slabclass *p;
-    struct item *it;
-    uint32_t i, offset;
-
-    p = &slabclass[cid];
-
-    /* initialize slab header */
-    slab_hdr_init(slab, cid);
-
-    /* initialize all slab items */
-    for (i = 0; i < p->nitem; i++) {
-        it = slab_2_item(slab, i, p->size);
-        offset = (uint32_t)((uint8_t *)it - (uint8_t *)slab);
-        item_hdr_init(it, offset, cid);
-    }
-
-    /* make this slab as the current slab */
-    p->nfree_item = p->nitem;
-    p->free_item = (struct item *)&slab->data[0];
-}
-
 
 /*
  * Get an item from the slab with a given id. We get an item either from:
@@ -370,7 +361,6 @@ slab_put_item(struct item *it)
 
     /*
      * Move lit into space occupied by it and adjust offset.
-     * FIXME: what if lit->refcount > 0
      */
     log_debug(LOG_INFO, "move it '%.*s' with cid %"PRIu8" at offset %"PRIu32" "
               "to offset %"PRIu32" ", lit->nkey, item_key(lit), lit->cid,
