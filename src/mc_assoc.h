@@ -33,8 +33,8 @@
 rstatus_t assoc_init(void);
 void assoc_deinit(void);
 
-struct item_idx *assoc_find(uint8_t *key, size_t nkey);
+struct item_idx *assoc_find(char *key, size_t nkey);
 void assoc_insert(struct item_idx *itx);
-void assoc_delete(uint8_t *key, size_t nkey);
+void assoc_delete(char *key, size_t nkey);
 
 #endif

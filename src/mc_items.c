@@ -105,33 +105,33 @@ item_release_refcount(struct item *it)
 }
 
 void
-item_hdr_init(struct item *it, uint32_t offset, uint8_t id)
+item_hdr_init(struct item *it, uint32_t offset, uint8_t cid)
 {
     ASSERT(offset >= SLAB_HDR_SIZE && offset < settings.slab_size);
 
     it->magic = ITEM_MAGIC;
     it->offset = offset;
-    it->id = id;
+    it->cid = cid;
     it->refcount = 0;
     it->flags = 0;
 }
 
 uint8_t
-item_slabid(uint8_t nkey, uint32_t nbyte)
+item_slabcid(uint8_t nkey, uint32_t nbyte)
 {
     size_t ntotal;
-    uint8_t id;
+    uint8_t cid;
 
     ntotal = item_ntotal(nkey, nbyte);
 
-    id = slab_id(ntotal);
-    if (id == SLABCLASS_INVALID_ID) {
+    cid = slab_cid(ntotal);
+    if (cid == SLABCLASS_INVALID_ID) {
         log_debug(LOG_NOTICE, "slab class id out of range with %"PRIu8" bytes "
                   "key, %"PRIu32" bytes value and %zu item chunk size", nkey,
                   nbyte, ntotal);
     }
 
-    return id;
+    return cid;
 }
 
 /*
@@ -144,20 +144,20 @@ item_slabid(uint8_t nkey, uint32_t nbyte)
  * into the hash or freed.
  */
 struct item *
-item_alloc(uint8_t id, char *key, uint8_t nkey, uint32_t dataflags,
+item_alloc(uint8_t cid, char *key, uint8_t nkey, uint32_t dataflags,
            rel_time_t exptime, uint32_t nbyte)
 {
     struct item *it;
 
-    ASSERT(id >= SLABCLASS_MIN_ID && id <= SLABCLASS_MAX_ID);
+    ASSERT(cid >= SLABCLASS_MIN_ID && cid <= SLABCLASS_MAX_ID);
 
-    it = slab_get_item(id);
+    it = slab_get_item(cid);
     if (it == NULL) {
-        log_warn("server error on allocating item in slab %"PRIu8, id);
+        log_warn("server error on allocating item in slab %"PRIu8, cid);
         return NULL;
     }
 
-    ASSERT(it->id == id);
+    ASSERT(it->cid == cid);
     ASSERT(!item_is_linked(it));
     ASSERT(!item_is_slabbed(it));
     ASSERT(it->offset != 0);
@@ -172,11 +172,11 @@ item_alloc(uint8_t id, char *key, uint8_t nkey, uint32_t dataflags,
     it->nkey = nkey;
     memcpy(item_key(it), key, nkey);
 
-    stats_slab_incr(id, item_acquire);
+    stats_slab_incr(cid, item_acquire);
 
-    log_debug(LOG_VERB, "alloc it '%.*s' at offset %"PRIu32" with id %"PRIu8
+    log_debug(LOG_VERB, "alloc it '%.*s' at offset %"PRIu32" with cid %"PRIu8
               " expiry %u refcount %"PRIu16"", it->nkey, item_key(it),
-              it->offset, it->id, it->exptime, it->refcount);
+              it->offset, it->cid, it->exptime, it->refcount);
 
     return it;
 }
@@ -199,8 +199,8 @@ item_link(struct item *it)
     ASSERT(!item_is_slabbed(it));
 
     log_debug(LOG_DEBUG, "link it '%.*s' at offset %"PRIu32" with flags "
-              "%02x id %"PRId8"", it->nkey, item_key(it), it->offset,
-              it->flags, it->id);
+              "%02x cid %"PRId8"", it->nkey, item_key(it), it->offset,
+              it->flags, it->cid);
 
     it->flags |= ITEM_LINKED;
 
@@ -208,8 +208,8 @@ item_link(struct item *it)
     struct item_idx *itx = mc_alloc(sizeof(*itx));
     ASSERT(itx != NULL);
     itx->nkey = it->nkey;
-    itx->key = (uint8_t*)item_key(it);
-    itx->saddr.offset = 0;
+    itx->key = item_key(it);
+    itx->sid = it->cid;
     itx->offset = it->offset;
 
     assoc_insert(itx);
@@ -226,8 +226,8 @@ item_unlink(struct item *it)
     ASSERT(item_is_linked(it));
 
     log_debug(LOG_DEBUG, "unlink it '%.*s' at offset %"PRIu32" with flags "
-              "%02x id %"PRId8"", it->nkey, item_key(it), it->offset,
-              it->flags, it->id);
+              "%02x cid %"PRId8"", it->nkey, item_key(it), it->offset,
+              it->flags, it->cid);
 
     if (item_is_linked(it)) {
         it->flags &= ~ITEM_LINKED;
@@ -251,8 +251,8 @@ item_remove(struct item *it)
     ASSERT(!item_is_slabbed(it));
 
     log_debug(LOG_DEBUG, "remove it '%.*s' at offset %"PRIu32" with flags "
-              "%02x id %"PRId8" refcount %"PRIu16"", it->nkey, item_key(it),
-              it->offset, it->flags, it->id, it->refcount);
+              "%02x cid %"PRId8" refcount %"PRIu16"", it->nkey, item_key(it),
+              it->offset, it->flags, it->cid, it->refcount);
 
     if (it->refcount != 0) {
         item_release_refcount(it);
@@ -285,9 +285,9 @@ item_replace(struct item *it, struct item *nit)
     ASSERT(nit->magic == ITEM_MAGIC);
     ASSERT(!item_is_slabbed(nit));
 
-    log_debug(LOG_VERB, "replace it '%.*s' at offset %"PRIu32" id %"PRIu8" "
-              "with one at offset %"PRIu32" id %"PRIu8"", it->nkey,
-              item_key(it), it->offset, it->id, nit->offset, nit->id);
+    log_debug(LOG_VERB, "replace it '%.*s' at offset %"PRIu32" cid %"PRIu8" "
+              "with one at offset %"PRIu32" cid %"PRIu8"", it->nkey,
+              item_key(it), it->offset, it->cid, nit->offset, nit->cid);
 
     item_unlink(it);
     item_link(nit);
@@ -301,7 +301,7 @@ item_replace(struct item *it, struct item *nit)
  * release refcount on the item
  */
 struct item *
-item_get(const char *key, size_t nkey)
+item_get(char *key, size_t nkey)
 {
     struct item_idx *itx;
     struct item *it;
@@ -312,13 +312,13 @@ item_get(const char *key, size_t nkey)
         return NULL;
     }
 
-    it = (struct item *)(slab_addr(itx->saddr.offset) + itx->offset);
+    it = (struct item *)(slab_addr(itx->sid) + itx->offset);
 
     if (item_expired(it)) {
         item_unlink(it);
-        stats_slab_incr(it->id, item_expire);
-        stats_slab_settime(it->id, item_reclaim_ts, time_now());
-        stats_slab_settime(it->id, item_expire_ts, it->exptime);
+        stats_slab_incr(it->cid, item_expire);
+        stats_slab_settime(it->cid, item_reclaim_ts, time_now());
+        stats_slab_settime(it->cid, item_expire_ts, it->exptime);
         log_debug(LOG_VERB, "get it '%.*s' expired and nuked", nkey, key);
         return NULL;
     }
@@ -326,8 +326,8 @@ item_get(const char *key, size_t nkey)
     item_acquire_refcount(it);
 
     log_debug(LOG_VERB, "get it '%.*s' found at offset %"PRIu32" with flags "
-              "%02x id %"PRIu8" refcount %"PRIu32"", it->nkey, item_key(it),
-              it->offset, it->flags, it->id);
+              "%02x cid %"PRIu8" refcount %"PRIu32"", it->nkey, item_key(it),
+              it->offset, it->flags, it->cid);
 
     return it;
 }

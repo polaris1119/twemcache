@@ -57,12 +57,12 @@ struct slabaddr {
  */
 struct slab {
     uint32_t          magic;    /* slab magic (const) */
-    uint8_t           id;       /* slabclass id */
+    uint8_t           cid;      /* slabclass id */
     uint8_t           unused;   /* unused */
+    uint32_t          id;       /* slab id */
     uint16_t          refcount; /* # concurrent users */
     TAILQ_ENTRY(slab) s_tqe;    /* link in slab q */
     rel_time_t        utime;    /* last update time in secs */
-    uint32_t          idx;      /* idx in slabtable */
     uint8_t           data[1];  /* opaque data */
 };
 
@@ -153,7 +153,7 @@ void slab_print(void);
 void slab_acquire_refcount(struct slab *slab);
 void slab_release_refcount(struct slab *slab);
 size_t slab_item_size(uint8_t id);
-uint8_t slab_id(size_t size);
+uint8_t slab_cid(size_t size);
 
 rstatus_t slab_init(void);
 void slab_deinit(void);

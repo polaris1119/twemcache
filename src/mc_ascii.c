@@ -474,7 +474,7 @@ asc_process_read(struct conn *c, struct token *token, int ntoken)
             it = item_get(key, nkey);
             if (it != NULL) {
                 /* item found */
-                stats_slab_incr(it->id, get_hit);
+                stats_slab_incr(it->cid, get_hit);
 
                 if (valid_key_iter >= c->isize) {
                     struct item **new_list;
@@ -554,7 +554,7 @@ asc_process_update(struct conn *c, struct token *token, int ntoken)
     time_t exptime;
     struct item *it;
     req_type_t type;
-    uint8_t id;
+    uint8_t cid;
 
     asc_set_noreply_maybe(c, token, ntoken);
 
@@ -606,8 +606,8 @@ asc_process_update(struct conn *c, struct token *token, int ntoken)
         return;
     }
 
-    id = item_slabid(nkey, vlen);
-    if (id == SLABCLASS_INVALID_ID) {
+    cid = item_slabcid(nkey, vlen);
+    if (cid == SLABCLASS_INVALID_ID) {
         log_debug(LOG_NOTICE, "client error on c %d for req of type %d and "
                   "slab id out of range for key size %"PRIu8" and value size "
                   "%"PRIu32, c->sd, c->req_type, nkey, vlen);
@@ -618,7 +618,7 @@ asc_process_update(struct conn *c, struct token *token, int ntoken)
 
     exptime = (time_t)exptime_int;
 
-    it = item_alloc(id, key, nkey, flags, time_reltime(exptime), vlen);
+    it = item_alloc(cid, key, nkey, flags, time_reltime(exptime), vlen);
     if (it == NULL) {
         log_warn("server error on c %d for req of type %d because of oom in "
                  "storing item", c->sd, c->req_type);

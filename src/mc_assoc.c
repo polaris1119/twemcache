@@ -57,7 +57,7 @@ assoc_create_table(uint32_t nbucket)
 }
 
 static struct itx_tqh *
-assoc_get_bucket(uint8_t *key, size_t nkey)
+assoc_get_bucket(char *key, size_t nkey)
 {
     struct itx_tqh *bucket;
     uint32_t hv, idx;
@@ -94,7 +94,7 @@ assoc_deinit(void)
 }
 
 struct item_idx *
-assoc_find(uint8_t *key, size_t nkey)
+assoc_find(char *key, size_t nkey)
 {
     struct itx_tqh *bucket;
     struct item_idx *itx;
@@ -125,7 +125,7 @@ assoc_insert(struct item_idx *itx)
 }
 
 void
-assoc_delete(uint8_t *key, size_t nkey)
+assoc_delete(char *key, size_t nkey)
 {
     struct itx_tqh *bucket;
     struct item_idx *itx;
