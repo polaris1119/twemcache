@@ -36,11 +36,20 @@ extern struct settings settings;
 
 struct slabclass slabclass[SLABCLASS_MAX_IDS]; /* collection of slabs bucketed by slabclass */
 uint8_t slabclass_max_id;                      /* maximum slabclass id */
-static struct slabaddr *slabtable;             /* table of all slabs in the system */
+
+static struct slabaddr *slabtable;             /* table of all slabs index by sid */
+static uint32_t nslabtable;                    /* # entries in slab table */
+
 static uint32_t nslab;                         /* # slab allocated */
+static uint32_t max_mem_nslab;
 static uint32_t max_nslab;                     /* max # slab allowed */
 
-uint8_t *mbase;                                /* base of in-memory slabs */
+static uint8_t *mbase;                         /* base of in-memory slabs */
+static int fd;                                 /* ssd.dump fd */
+
+static off_t woff;                             /* write offset on disk */
+static off_t last_woff;
+static bool evict;
 
 /*
  * Return the usable space for item sized chunks that would be carved out
@@ -50,12 +59,6 @@ size_t
 slab_size(void)
 {
     return settings.slab_size - SLAB_HDR_SIZE;
-}
-
-uint8_t *
-slab_addr(uint32_t id)
-{
-    return mbase + slabtable[id].offset;
 }
 
 struct slab *
@@ -237,33 +240,50 @@ slab_init(void)
     slab_slabclass_init();
 
     /*
+     * Create a 64M file in your home directory
+     *  $ dd if=/dev/zero of=~/ssd.dump bs=1024K count=64
+     */
+    fd = open("/home/manj/ssd.dump", O_RDWR, 0644);
+    if (fd < 0) {
+        log_error("open /home/manj/ssd.dump failed: %s", strerror(errno));
+        return MC_ERROR;
+    }
+
+    /*
      * For now, in-memory slabs equals the number of usable slabclass. In
      * future, this would be controlled by the usable space that would
      * be available to be in-memory
      */
     nslab = 0;
-    max_nslab = slabclass_max_id; /* slabclass 0 has no slabs */
-    size = max_nslab * settings.slab_size;
+    max_nslab = 64;
+    max_mem_nslab = slabclass_max_id; /* slabclass 0 has no slabs */
+    size = max_mem_nslab * settings.slab_size;
 
-    slabtable = mc_alloc(sizeof(*slabtable) * max_nslab);
+    evict = false;
+    woff = 0;
+    last_woff = woff + (max_nslab * settings.slab_size);
+
+    nslabtable = max_mem_nslab + max_nslab;
+
+    slabtable = mc_alloc(sizeof(*slabtable) * nslabtable);
     if (slabtable == NULL) {
         log_error("slabtable create with %"PRIu32" entries failed: %s",
-                  max_nslab, strerror(errno));
+                  nslabtable, strerror(errno));
         return MC_ENOMEM;
     }
     log_debug(LOG_INFO, "created slabtable of %zu bytes with %"PRIu32" "
-              "entries", 100, max_nslab);
+              "entries", sizeof(*slabtable) * nslabtable, nslabtable);
 
     mbase = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS,
                  -1, 0);
     if (mbase == ((void *) -1)) {
         log_error("mmap %zu bytes for %"PRIu32" slabs failed: %s",
-                  size, max_nslab, strerror(errno));
+                  size, max_mem_nslab, strerror(errno));
         mc_free(slabtable);
         return MC_ENOMEM;
     }
     log_debug(LOG_INFO, "pre-allocated %zu bytes for %"PRIu32" in-memory slabs",
-              size, max_nslab);
+              size, max_mem_nslab);
 
     /* populate the slabtable with in-memory slabs */
     for (nslab = 0, cur = mbase, cid = SLABCLASS_MIN_ID;
@@ -272,15 +292,20 @@ slab_init(void)
 
         slab = (struct slab *)cur;
 
+        /* create the slab address for this slab */
         saddr = &slabtable[nslab];
         saddr->offset = nslab * settings.slab_size;
+        saddr->memory = 1;
+
         /* link the nslab into the slabclass identified by the given cid */
         slab_add_one(slab, cid, nslab);
+
+        slabclass[cid].slab = slab;
 
         log_debug(LOG_INFO, "new slab %p allocated at pos %u", slab, nslab);
 
     }
-    ASSERT(nslab == max_nslab);
+    ASSERT(nslab <= max_nslab);
 
     return MC_OK;
 }
@@ -289,6 +314,105 @@ void
 slab_deinit(void)
 {
     /* FIXME: munmap */
+}
+
+static char sbuf[MB];
+
+static uint32_t
+slab_evict_slab(void)
+{
+    int n, status;
+
+    if (woff >= last_woff) {
+        /* [0, woff, last_woff] is a circular buffer  */
+        woff = 0;
+    }
+
+    status = lseek(fd, woff, SEEK_SET);
+    if (status < 0) {
+        log_error("lseek to woff %d failed: %s", (int)woff, strerror(errno));
+        NOT_REACHED();
+    }
+
+    n = read(fd, sbuf, MB);
+    if (n < MB) {
+        log_error("write 1MB failed: %s", strerror(errno));
+        NOT_REACHED();
+    }
+
+    struct slab *slab = (struct slab *)sbuf;
+    ASSERT(slab->magic == SLAB_MAGIC);
+
+    uint32_t i;
+    struct slabclass *p;
+
+    p = &slabclass[slab->cid];
+
+    // assoc_dump();
+
+    for (i = 0; i < p->nitem; i++) {
+        struct item *it = slab_2_item(slab, i, p->size);
+
+        ASSERT(it->magic == ITEM_MAGIC);
+
+        if (item_is_linked(it)) {
+            it->flags &= ~ITEM_LINKED;
+            ASSERT(assoc_find(item_key(it), it->nkey) != NULL);
+            assoc_delete(item_key(it), it->nkey);
+        }
+    }
+
+    return slab->sid;
+}
+
+static void
+slab_write_to_disk(uint8_t cid, uint32_t slabtable_id)
+{
+    rstatus_t status;
+    struct slabclass *p;
+    int n;
+    struct slab *slab;
+    uint32_t i;
+
+    p = &slabclass[cid];
+
+    log_debug(LOG_INFO, "no free item in cid %"PRIu8"", cid);
+
+    status = lseek(fd, woff, SEEK_SET);
+    if (status < 0) {
+        log_error("lseek to woff %d failed: %s", (int)woff, strerror(errno));
+        NOT_REACHED();
+    }
+
+    /* current slab */
+    slab = slabclass[cid].slab;
+
+    /* write the current slab */
+    n = write(fd, slab, MB);
+    if (n < MB) {
+        log_error("write 1MB failed: %s", strerror(errno));
+        NOT_REACHED();
+    }
+
+    /* update slab address to point to disk */
+    slabtable[slab->sid].offset = woff;
+    slabtable[slab->sid].memory = 0;
+
+    /* reuse the in-memory slab */
+    p->nfree_item = p->nitem;
+    p->free_item = (struct item *)&slab->data[0];
+    for (i = 0; i < p->nitem; i++) {
+        struct item *it = slab_2_item(slab, i, p->size);
+        uint32_t offset = (uint32_t)((uint8_t *)it - (uint8_t *)slab);
+        item_hdr_init(it, offset, cid, slab->sid);
+    }
+
+    /* update the slab table */
+    slabtable[slabtable_id].offset = ((uint8_t *)slab - mbase);
+    slabtable[slabtable_id].memory = 1;
+
+    /* update the write offset */
+    woff += MB;
 }
 
 /*
@@ -307,8 +431,27 @@ slab_get_item(uint8_t cid)
     ASSERT(cid >= SLABCLASS_MIN_ID && cid <= slabclass_max_id);
     p = &slabclass[cid];
 
-    /* FIXME: there is always a free item */
-    ASSERT(p->free_item != NULL);
+    if (p->free_item == NULL) {
+        uint32_t slabtable_id;
+        /*
+         * No more free item in this in-memory slab; it it time to reuse this
+         * slab by writing it to disk tier
+         */
+        if (woff >= last_woff || evict == true) {
+            /* disk tier is full, evict one slab from the disk tier */
+            ASSERT(nslab == nslabtable);
+            evict = true;
+            slabtable_id = slab_evict_slab();
+        } else {
+            slabtable_id = nslab;
+            nslab++;
+            ASSERT(nslab <= (max_nslab + max_mem_nslab));
+            ASSERT(nslab <= nslabtable);
+        }
+
+        slab_write_to_disk(cid, slabtable_id);
+
+    }
 
     /* return item from current slab */
     it = p->free_item;

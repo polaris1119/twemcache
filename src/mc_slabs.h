@@ -31,7 +31,8 @@
 #define _MC_SLABS_H_
 
 struct slabaddr {
-    uint32_t offset;    /* offset of slab */
+    uint32_t  offset;   /* offset of slab */
+    unsigned  memory:1; /* memory? */
 };
 
 /*
@@ -131,6 +132,8 @@ struct slabclass {
 
     uint32_t        nfree_item;  /* # free item (in current slab) */
     struct item     *free_item;  /* next free item (in current slab) */
+
+    struct slab     *slab;       /* current slab */
 };
 
 /*
@@ -156,7 +159,6 @@ void slab_deinit(void);
 struct item *slab_get_item(uint8_t id);
 void slab_put_item(struct item *it);
 
-uint8_t *slab_addr(uint32_t id);
 struct slab *slab_read(uint32_t id);
 
 #endif

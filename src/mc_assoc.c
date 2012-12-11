@@ -37,6 +37,7 @@
 static struct itx_tqh *hashtable;   /* hash table */
 static uint32_t nhash_item;         /* # itx in hash table */
 static uint32_t hash_power;         /* # buckets = 2^hash_power */
+static uint32_t nbucket;
 
 static struct itx_tqh *
 assoc_create_table(uint32_t nbucket)
@@ -72,8 +73,6 @@ assoc_get_bucket(char *key, size_t nkey)
 rstatus_t
 assoc_init(void)
 {
-    uint32_t nbucket;
-
     hashtable = NULL;
     hash_power = HASH_POWER;
 
@@ -113,9 +112,22 @@ assoc_find(char *key, size_t nkey)
 }
 
 void
-assoc_insert(struct item_idx *itx)
+assoc_insert(char *key, uint8_t nkey, uint32_t sid, uint32_t offset)
 {
+    struct item_idx *itx;
     struct itx_tqh *bucket;
+
+    itx = mc_alloc(sizeof(*itx));
+    ASSERT(itx != NULL);
+
+    itx->key = mc_alloc(nkey);
+    ASSERT(itx->key != NULL);
+
+    itx->nkey = nkey;
+    memcpy(itx->key, key, nkey);
+
+    itx->sid = sid;
+    itx->offset = offset;
 
     ASSERT(assoc_find(itx->key, itx->nkey) == NULL);
 
@@ -135,5 +147,29 @@ assoc_delete(char *key, size_t nkey)
     ASSERT(itx != NULL);
     TAILQ_REMOVE(bucket, itx, h_tqe);
 
+    mc_free(itx->key);
+    mc_free(itx);
+
     nhash_item--;
+}
+
+void
+assoc_dump(void)
+{
+    uint32_t i;
+
+    for (i = 0; i < nbucket; i++) {
+        struct itx_tqh *bucket;
+        struct item_idx *itx;
+
+        bucket = &hashtable[i];
+
+        if (TAILQ_EMPTY(bucket)) {
+            continue;
+        }
+
+        TAILQ_FOREACH(itx, bucket, h_tqe) {
+            loga("[%d] %.*s", i, itx->nkey, itx->key);
+        }
+    }
 }

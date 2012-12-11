@@ -179,15 +179,7 @@ item_link(struct item *it)
 
     it->flags |= ITEM_LINKED;
 
-    /* FIXME: */
-    struct item_idx *itx = mc_alloc(sizeof(*itx));
-    ASSERT(itx != NULL);
-    itx->nkey = it->nkey;
-    itx->key = item_key(it);
-    itx->sid = it->sid;
-    itx->offset = it->offset;
-
-    assoc_insert(itx);
+    assoc_insert(item_key(it), it->nkey, it->sid, it->offset);
 }
 
 /*

@@ -34,7 +34,9 @@ rstatus_t assoc_init(void);
 void assoc_deinit(void);
 
 struct item_idx *assoc_find(char *key, size_t nkey);
-void assoc_insert(struct item_idx *itx);
+void assoc_insert(char *key, uint8_t nkey, uint32_t sid, uint32_t offset);
 void assoc_delete(char *key, size_t nkey);
+
+void assoc_dump(void);
 
 #endif
