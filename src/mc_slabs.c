@@ -51,6 +51,9 @@ static off_t woff;                             /* write offset on disk */
 static off_t last_woff;
 static bool evict;
 
+static char sbuf[MB];
+
+
 /*
  * Return the usable space for item sized chunks that would be carved out
  * of a given slab.
@@ -64,7 +67,35 @@ slab_size(void)
 struct slab *
 slab_read(uint32_t id)
 {
-    return (struct slab *)(mbase + slabtable[id].offset);
+    struct slabaddr *saddr;
+    struct slab *slab;
+
+    ASSERT(id < nslabtable);
+
+    saddr = &slabtable[id];
+
+    if (saddr->memory) {
+        slab = (struct slab *)(mbase + saddr->offset);
+    } else {
+        int n, status;
+        off_t off = saddr->offset;
+
+        status = lseek(fd, off, SEEK_SET);
+        if (status < 0) {
+            log_error("lseek to woff %d failed: %s", (int)off, strerror(errno));
+            NOT_REACHED();
+        }
+
+        n = read(fd, sbuf, MB);
+        if (n < MB) {
+            log_error("read MB failed: %s", strerror(errno));
+            NOT_REACHED();
+        }
+
+        slab = (struct slab *)sbuf;
+    }
+
+    return slab;
 }
 
 void
@@ -316,8 +347,6 @@ slab_deinit(void)
     /* FIXME: munmap */
 }
 
-static char sbuf[MB];
-
 static uint32_t
 slab_evict_slab(void)
 {
@@ -328,6 +357,8 @@ slab_evict_slab(void)
         woff = 0;
     }
 
+    log_debug(LOG_INFO, "evict slab at offset woff %d", (int)woff);
+
     status = lseek(fd, woff, SEEK_SET);
     if (status < 0) {
         log_error("lseek to woff %d failed: %s", (int)woff, strerror(errno));
@@ -336,7 +367,7 @@ slab_evict_slab(void)
 
     n = read(fd, sbuf, MB);
     if (n < MB) {
-        log_error("write 1MB failed: %s", strerror(errno));
+        log_error("read MB failed: %s", strerror(errno));
         NOT_REACHED();
     }
 
@@ -376,8 +407,6 @@ slab_write_to_disk(uint8_t cid, uint32_t slabtable_id)
 
     p = &slabclass[cid];
 
-    log_debug(LOG_INFO, "no free item in cid %"PRIu8"", cid);
-
     status = lseek(fd, woff, SEEK_SET);
     if (status < 0) {
         log_error("lseek to woff %d failed: %s", (int)woff, strerror(errno));
@@ -393,6 +422,9 @@ slab_write_to_disk(uint8_t cid, uint32_t slabtable_id)
         log_error("write 1MB failed: %s", strerror(errno));
         NOT_REACHED();
     }
+
+    log_debug(LOG_INFO, "slab cid %"PRIu8" is empty, write sid %d to disk, "
+              "use sid %d as in-memory slab", cid, slab->sid, slabtable_id);
 
     /* update slab address to point to disk */
     slabtable[slab->sid].offset = woff;
@@ -410,6 +442,7 @@ slab_write_to_disk(uint8_t cid, uint32_t slabtable_id)
     /* update the slab table */
     slabtable[slabtable_id].offset = ((uint8_t *)slab - mbase);
     slabtable[slabtable_id].memory = 1;
+    slab->sid = slabtable_id;
 
     /* update the write offset */
     woff += MB;
